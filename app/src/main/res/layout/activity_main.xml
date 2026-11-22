@@ -9,53 +9,115 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <com.aicam.pro.OverlayView
+        android:id="@+id/overlayView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- Top HUD + AI Coach Pill -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="top"
-        android:background="#88000000"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingStart="12dp"
-        android:paddingTop="36dp"
-        android:paddingEnd="12dp"
-        android:paddingBottom="10dp">
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#99000000"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="12dp"
+            android:paddingTop="36dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="8dp">
+
+            <TextView
+                android:id="@+id/tvBadge"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="AI PRO | Starting..."
+                android:textColor="#00FFAA"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnSpecs"
+                style="?android:attr/buttonBarButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="SPECS"
+                android:textColor="#FFFFFF" />
+
+            <Button
+                android:id="@+id/btnFlip"
+                style="?android:attr/buttonBarButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="FLIP"
+                android:textColor="#FFFFFF" />
+        </LinearLayout>
 
         <TextView
-            android:id="@+id/tvBadge"
-            android:layout_width="0dp"
+            android:id="@+id/tvCoach"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Scanning Camera DNA..."
-            android:textColor="#00FFAA"
-            android:textSize="13sp"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="10dp"
+            android:background="#BB111111"
+            android:paddingStart="16dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="8dp"
+            android:text="AI Photographer Ready"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
             android:textStyle="bold" />
-
-        <Button
-            android:id="@+id/btnSpecs"
-            style="?android:attr/buttonBarButtonStyle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="SPECS"
-            android:textColor="#FFFFFF" />
-
-        <Button
-            android:id="@+id/btnFlip"
-            style="?android:attr/buttonBarButtonStyle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="FLIP"
-            android:textColor="#FFFFFF" />
     </LinearLayout>
 
+    <!-- Bottom Controls -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        android:background="#AA000000"
+        android:background="#B3000000"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:padding="14dp">
 
+        <!-- AI Quick Toggles -->
+        <LinearLayout
+            android:id="@+id/aiToggleRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingBottom="6dp">
+
+            <Button
+                android:id="@+id/btnVoice"
+                style="?android:attr/buttonBarButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:text="VOICE: ON"
+                android:textColor="#00FFAA"
+                android:textSize="12sp" />
+
+            <View
+                android:layout_width="16dp"
+                android:layout_height="1dp" />
+
+            <Button
+                android:id="@+id/btnAutoClick"
+                style="?android:attr/buttonBarButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:text="AUTO-CLICK: ON"
+                android:textColor="#00FFAA"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- Manual DSLR Controls -->
         <LinearLayout
             android:id="@+id/manualPanel"
             android:layout_width="match_parent"
@@ -99,7 +161,6 @@
             android:id="@+id/tvZoom"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
             android:text="Zoom: 1.0x"
             android:textColor="#CCCCCC"
             android:textSize="12sp" />
@@ -114,7 +175,7 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="10dp"
             android:gravity="center"
             android:orientation="horizontal">
 
@@ -122,10 +183,10 @@
                 android:id="@+id/btnMode"
                 android:layout_width="wrap_content"
                 android:layout_height="48dp"
-                android:text="MODE: AUTO" />
+                android:text="MODE: AI PRO" />
 
             <View
-                android:layout_width="20dp"
+                android:layout_width="18dp"
                 android:layout_height="1dp" />
 
             <Button
