@@ -7,13 +7,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.ColorMatrix
-import android.graphics.ColorMatrixColorFilter
-import android.graphics.Matrix
-import android.graphics.Paint
 import android.graphics.RectF
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -66,7 +60,6 @@ import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
-import androidx.exifinterface.media.ExifInterface
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.Face
 import com.google.mlkit.vision.face.FaceDetection
@@ -76,7 +69,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.FileInputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.text.SimpleDateFormat
@@ -90,13 +82,6 @@ import kotlin.math.atan2
 class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private enum class CamMode { AI_PRO, AUTO, MANUAL }
-    private enum class ProLook(val label: String) {
-        NATURAL("NATURAL"),
-        CINEMATIC("CINEMA"),
-        WARM_GOLD("GOLDEN"),
-        VIVID("VIVID"),
-        NOIR_BW("NOIR B&W")
-    }
 
     private lateinit var previewView: PreviewView
     private lateinit var overlayView: OverlayView
@@ -108,6 +93,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var tvZoom: TextView
     private lateinit var manualPanel: LinearLayout
     private lateinit var aiToggleRow: LinearLayout
+    private lateinit var proFinishRow: LinearLayout
     private lateinit var seekIso: SeekBar
     private lateinit var seekShutter: SeekBar
     private lateinit var seekZoom: SeekBar
@@ -118,6 +104,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var btnVoice: Button
     private lateinit var btnAutoClick: Button
     private lateinit var btnAutoZoom: Button
+    private lateinit var btnBurst: Button
+    private lateinit var btnReframe: Button
+    private lateinit var btnBokeh: Button
     private lateinit var btnLook: Button
     private lateinit var btnDirector: Button
 
@@ -129,6 +118,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var lensFacing = CameraSelector.LENS_FACING_BACK
     private var currentMode = CamMode.AI_PRO
     private var currentLook = ProLook.NATURAL
+    private var currentReframe = ReframeMode.OFF
+    private var currentBokeh = BokehLevel.OFF
+    private var isBurstEnabled = false
     private var isVideoMode = false
     private var isRecording = false
     private var isVoiceEnabled = true
@@ -147,6 +139,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var analysisExecutor: ExecutorService
     private lateinit var ioExecutor: ExecutorService
     private lateinit var faceDetector: FaceDetector
+    private lateinit var photoEngine: AiPhotoEngine
     private lateinit var sensorManager: SensorManager
     private var accelerometer: Sensor? = null
     private var tts: TextToSpeech? = null
@@ -166,11 +159,11 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var lastEvAdjustTime = 0L
     private var lastAutoZoomTime = 0L
     private var lastHardwareProfileTime = 0L
-    private var lastDirectorTipUntil = 0L
+    private var lastStatusHoldUntil = 0L
     private var lastNightFlag = false
     private var currentEvIndex = 0
     private var stablePerfectFrames = 0
-    private var isCapturingPhoto = false
+    @Volatile private var isCapturingPhoto = false
 
     private val allShutterPresets = listOf(
         "1/4000s" to 250_000L,
@@ -214,6 +207,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         tvZoom = findViewById(R.id.tvZoom)
         manualPanel = findViewById(R.id.manualPanel)
         aiToggleRow = findViewById(R.id.aiToggleRow)
+        proFinishRow = findViewById(R.id.proFinishRow)
         seekIso = findViewById(R.id.seekIso)
         seekShutter = findViewById(R.id.seekShutter)
         seekZoom = findViewById(R.id.seekZoom)
@@ -224,6 +218,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         btnVoice = findViewById(R.id.btnVoice)
         btnAutoClick = findViewById(R.id.btnAutoClick)
         btnAutoZoom = findViewById(R.id.btnAutoZoom)
+        btnBurst = findViewById(R.id.btnBurst)
+        btnReframe = findViewById(R.id.btnReframe)
+        btnBokeh = findViewById(R.id.btnBokeh)
         btnLook = findViewById(R.id.btnLook)
         btnDirector = findViewById(R.id.btnDirector)
 
@@ -237,6 +234,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             .enableTracking()
             .build()
         faceDetector = FaceDetection.getClient(detectorOptions)
+        photoEngine = AiPhotoEngine(this, faceDetector)
 
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
@@ -279,8 +277,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         findViewById<Button>(R.id.btnFlip).setOnClickListener {
-            if (isRecording) {
-                Toast.makeText(this, "Pehle video stop karo", Toast.LENGTH_SHORT).show()
+            if (isRecording || isCapturingPhoto) {
+                Toast.makeText(this, "Abhi processing/recording chal rahi hai", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
             lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
@@ -297,6 +295,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         btnPhotoVideo.setOnClickListener {
+            if (isCapturingPhoto) return@setOnClickListener
             if (isRecording) stopVideoRecording()
             isVideoMode = !isVideoMode
             if (isVideoMode && currentMode == CamMode.MANUAL) currentMode = CamMode.AI_PRO
@@ -361,6 +360,44 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             btnAutoZoom.setTextColor(if (isAutoZoomEnabled) Color.parseColor("#00FFAA") else Color.GRAY)
         }
 
+        btnBurst.setOnClickListener {
+            isBurstEnabled = !isBurstEnabled
+            btnBurst.text = if (isBurstEnabled) "BURST:3x" else "BURST:OFF"
+            btnBurst.setTextColor(if (isBurstEnabled) Color.parseColor("#FF80AB") else Color.parseColor("#AAAAAA"))
+            val msg = if (isBurstEnabled) "Best-Shot 3x Burst ON (Zero Blur)" else "Burst OFF"
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+        }
+
+        btnReframe.setOnClickListener {
+            val all = ReframeMode.values()
+            currentReframe = all[(currentReframe.ordinal + 1) % all.size]
+            btnReframe.text = currentReframe.label
+            btnReframe.setTextColor(
+                if (currentReframe == ReframeMode.OFF) Color.parseColor("#AAAAAA") else Color.parseColor("#80D8FF")
+            )
+            val msg = if (currentReframe == ReframeMode.OFF) {
+                "Auto-Reframe OFF"
+            } else {
+                "iPhone Reframe ON: Auto-Straighten + ${currentReframe.label.removePrefix("REFR:")}"
+            }
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+        }
+
+        btnBokeh.setOnClickListener {
+            val all = BokehLevel.values()
+            currentBokeh = all[(currentBokeh.ordinal + 1) % all.size]
+            btnBokeh.text = currentBokeh.label
+            btnBokeh.setTextColor(
+                if (currentBokeh == BokehLevel.OFF) Color.parseColor("#AAAAAA") else Color.parseColor("#B388FF")
+            )
+            val msg = if (currentBokeh == BokehLevel.OFF) {
+                "DSLR Background Blur OFF"
+            } else {
+                "AI DSLR Bokeh ON (${currentBokeh.label.removePrefix("BLUR:")})"
+            }
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+        }
+
         btnLook.setOnClickListener {
             val all = ProLook.values()
             currentLook = all[(currentLook.ordinal + 1) % all.size]
@@ -370,11 +407,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         btnDirector.setOnClickListener {
             val savedKey = getGeminiKey()
-            if (savedKey.isBlank()) {
-                showGeminiKeyDialog()
-            } else {
-                askGeminiCreativeDirector(savedKey)
-            }
+            if (savedKey.isBlank()) showGeminiKeyDialog() else askGeminiCreativeDirector(savedKey)
         }
         btnDirector.setOnLongClickListener {
             showGeminiKeyDialog()
@@ -385,7 +418,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             if (isVideoMode) {
                 if (isRecording) stopVideoRecording() else startVideoRecording()
             } else {
-                takePhoto(isAuto = false)
+                triggerSmartCapture(isAuto = false)
             }
         }
     }
@@ -448,8 +481,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private fun updateUIState() {
         btnPhotoVideo.text = if (isVideoMode) "VIDEO" else "PHOTO"
-        btnLook.visibility = if (isVideoMode) View.INVISIBLE else View.VISIBLE
+        proFinishRow.visibility = if (isVideoMode) View.GONE else View.VISIBLE
         btnAutoClick.visibility = if (isVideoMode) View.INVISIBLE else View.VISIBLE
+        btnBurst.visibility = if (isVideoMode) View.INVISIBLE else View.VISIBLE
 
         if (isVideoMode) {
             btnCapture.text = if (isRecording) "STOP" else "REC"
@@ -458,7 +492,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             )
             btnFlash.text = if (torchEnabled) "TORCH" else "FL:OFF"
         } else {
-            btnCapture.text = "CAPTURE"
+            btnCapture.text = if (isCapturingPhoto) "WAIT..." else "CAPTURE"
             btnCapture.backgroundTintList = null
             btnFlash.text = when (flashMode) {
                 ImageCapture.FLASH_MODE_AUTO -> "FL:A"
@@ -508,6 +542,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         activeRecording?.stop()
         analysisExecutor.shutdown()
         ioExecutor.shutdown()
+        photoEngine.close()
         faceDetector.close()
         tts?.stop()
         tts?.shutdown()
@@ -565,15 +600,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                         cameraProvider.bindToLifecycle(
                             this, cameraSelector, preview, videoCapture, imageAnalysis
                         )
-                    } catch (e: Exception) {
-                        // Fallback for budget devices that support max 2 streams in video mode
+                    } catch (_: Exception) {
                         cameraProvider.unbindAll()
                         cameraProvider.bindToLifecycle(this, cameraSelector, preview, videoCapture)
                     }
                 } else {
                     videoCapture = null
                     imageCapture = ImageCapture.Builder()
-                        .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                        .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                         .setFlashMode(flashMode)
                         .build()
                     cameraProvider.bindToLifecycle(
@@ -610,7 +644,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     @OptIn(ExperimentalGetImage::class)
     private fun analyzeFrame(imageProxy: ImageProxy) {
-        if (currentMode != CamMode.AI_PRO) {
+        if (currentMode != CamMode.AI_PRO || isCapturingPhoto) {
             imageProxy.close()
             return
         }
@@ -620,19 +654,16 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             return
         }
 
-        // Fast Y-plane Histogram Stats (Brightness + Highlights + Shadows)
         val yBuffer = imageProxy.planes[0].buffer
         val limit = yBuffer.limit()
         var lumaSum = 0L
         var brightPx = 0
-        var darkPx = 0
         var count = 0
         var idx = 0
         while (idx < limit) {
             val y = yBuffer.get(idx).toInt() and 0xFF
             lumaSum += y
             if (y > 235) brightPx++
-            if (y < 35) darkPx++
             count++
             idx += 52
         }
@@ -675,7 +706,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             else RectF(rawLeft, top, rawRight, bottom)
         }
 
-        // Scene Lighting Brain
         val isNight = avgLuma < 52
         val isBacklit = faces.isNotEmpty() && brightRatio > 0.22f && avgLuma < 145
         val isHarshSun = brightRatio > 0.30f && avgLuma > 180
@@ -692,7 +722,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             else -> "LANDSCAPE"
         }
 
-        // Autonomous Hardware Control (Exposure + Noise Reduction + Stabilization)
         autoAdjustExposure(avgLuma, isBacklit, isHarshSun)
         applyHardwareAiProfile(isNight)
 
@@ -715,17 +744,16 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             val tip = when {
                 isShaking -> "Haath hil raha hai, phone steady rakho"
                 abs(roll) > 7f -> "Phone seedha rakho (Horizon tedha hai)"
-                isNight -> "Night Pro active: phone hilaye bina click karo"
+                isNight -> "Night Pro active: phone steady rakh kar click karo"
                 isHarshSun -> "Light tez hai, highlights protect kar raha hu"
                 else -> "Framing aur light balanced hai — ready!"
             }
-            if (isVideoMode && isRecording && isShaking) {
-                speakTip("Haath steady rakho")
-            }
+            if (isVideoMode && isRecording && isShaking) speakTip("Haath steady rakho")
+
             runOnUiThread {
                 overlayView.updateOverlay(emptyList(), sceneScore, roll, true, isRecording)
                 tvBadge.text = "$sceneTag | $sceneScore% | EV:$currentEvIndex"
-                if (System.currentTimeMillis() > lastDirectorTipUntil) {
+                if (System.currentTimeMillis() > lastStatusHoldUntil) {
                     tvCoach.text = tip
                     tvCoach.setTextColor(if (sceneScore >= 80) Color.parseColor("#00FFAA") else Color.WHITE)
                 }
@@ -733,7 +761,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             return
         }
 
-        // Primary subject = largest face
         var bestIdx = 0
         var maxArea = 0f
         for (i in normBoxes.indices) {
@@ -749,15 +776,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val cy = mainBox.centerY()
         val fw = mainBox.width()
 
-        // Lock Hardware Autofocus & Spot Metering on primary face
         autoFocusOnFace(cx, cy)
+        if (isAutoZoomEnabled) autoAdjustZoom(faces.size, fw, isFront)
 
-        // Autonomous Framing Zoom
-        if (isAutoZoomEnabled) {
-            autoAdjustZoom(faces.size, fw, isFront)
-        }
-
-        // Check ALL faces for open eyes (important for group photos!)
         var allEyesOpen = true
         for (f in faces) {
             val le = f.leftEyeOpenProbability ?: 1f
@@ -834,15 +855,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             speakTip(voiceMsg)
         }
 
-        // Smart Auto-Click (Photo mode only, requires steady hands + open eyes + score >= 85)
         if (!isVideoMode && isAutoClickEnabled && !isCapturingPhoto && totalScore >= 85 && allEyesOpen && !isShaking) {
             stablePerfectFrames++
             val now = System.currentTimeMillis()
-            if (stablePerfectFrames >= 3 && now - lastAutoClickTime > 4000L) {
+            if (stablePerfectFrames >= 3 && now - lastAutoClickTime > 4500L) {
                 lastAutoClickTime = now
                 stablePerfectFrames = 0
                 speakTip("Perfect!")
-                runOnUiThread { takePhoto(isAuto = true) }
+                runOnUiThread { triggerSmartCapture(isAuto = true) }
             }
         } else {
             stablePerfectFrames = 0
@@ -851,7 +871,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         runOnUiThread {
             overlayView.updateOverlay(normBoxes, totalScore, roll, true, isRecording, faceTag)
             tvBadge.text = "$sceneTag | $totalScore% | EV:$currentEvIndex"
-            if (System.currentTimeMillis() > lastDirectorTipUntil) {
+            if (System.currentTimeMillis() > lastStatusHoldUntil) {
                 tvCoach.text = coachingTip
                 tvCoach.setTextColor(
                     when {
@@ -863,6 +883,206 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             }
         }
     }
+
+    // ==================== V4 SMART CAPTURE (BURST + REFRAME + DSLR BOKEH) ====================
+
+    private fun triggerSmartCapture(isAuto: Boolean) {
+        val capture = imageCapture ?: return
+        if (isCapturingPhoto) return
+        isCapturingPhoto = true
+        updateUIState()
+
+        val rollSnapshot = currentRollDeg
+        val isFrontSnapshot = (lensFacing == CameraSelector.LENS_FACING_FRONT)
+        val reframeSnapshot = currentReframe
+        val bokehSnapshot = currentBokeh
+        val lookSnapshot = currentLook
+        val totalShots = if (isBurstEnabled) 3 else 1
+
+        val needsPostAi = isBurstEnabled ||
+            reframeSnapshot != ReframeMode.OFF ||
+            bokehSnapshot != BokehLevel.OFF ||
+            lookSnapshot != ProLook.NATURAL
+
+        val prefix = if (isAuto) "AICAM_AUTO_" else "AICAM_V4_"
+        val fileName = prefix + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
+            .format(System.currentTimeMillis())
+
+        // Fast direct-to-gallery path if no V4 finishing is turned on
+        if (!needsPostAi) {
+            val contentValues = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
+                    put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/AICam-Pro")
+                }
+            }
+            val outOpts = ImageCapture.OutputFileOptions.Builder(
+                contentResolver,
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                contentValues
+            ).build()
+
+            capture.takePicture(
+                outOpts,
+                ContextCompat.getMainExecutor(this),
+                object : ImageCapture.OnImageSavedCallback {
+                    override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                        isCapturingPhoto = false
+                        updateUIState()
+                        val msg = if (isAuto) "AI Auto-Clicked!" else "Saved in Gallery/AICam-Pro"
+                        Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
+                    }
+                    override fun onError(exc: ImageCaptureException) {
+                        isCapturingPhoto = false
+                        updateUIState()
+                        Toast.makeText(this@MainActivity, "Capture failed: ${exc.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            )
+            return
+        }
+
+        // V4 AI Pipeline path (Burst + Auto-Reframe + DSLR Bokeh + Pro Color Look)
+        val capturedFiles = mutableListOf<File>()
+        captureBurstStep(
+            step = 0,
+            total = totalShots,
+            capturedFiles = capturedFiles,
+            fileName = fileName,
+            rollSnapshot = rollSnapshot,
+            isFront = isFrontSnapshot,
+            reframe = reframeSnapshot,
+            bokeh = bokehSnapshot,
+            look = lookSnapshot,
+            isAuto = isAuto
+        )
+    }
+
+    private fun captureBurstStep(
+        step: Int,
+        total: Int,
+        capturedFiles: MutableList<File>,
+        fileName: String,
+        rollSnapshot: Float,
+        isFront: Boolean,
+        reframe: ReframeMode,
+        bokeh: BokehLevel,
+        look: ProLook,
+        isAuto: Boolean
+    ) {
+        val capture = imageCapture
+        if (capture == null || isFinishing || isDestroyed) {
+            capturedFiles.forEach { it.delete() }
+            isCapturingPhoto = false
+            updateUIState()
+            return
+        }
+
+        if (total > 1) {
+            showCoachStatus("Burst ${step + 1}/$total... Hold steady!", "#FF80AB", 3000L)
+        } else {
+            showCoachStatus("Capturing...", "#00FFAA", 2000L)
+        }
+
+        val tempFile = File(cacheDir, "v4_shot_${System.currentTimeMillis()}_$step.jpg")
+        val outOpts = ImageCapture.OutputFileOptions.Builder(tempFile).build()
+
+        capture.takePicture(
+            outOpts,
+            ContextCompat.getMainExecutor(this),
+            object : ImageCapture.OnImageSavedCallback {
+                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                    capturedFiles.add(tempFile)
+                    if (step + 1 < total) {
+                        captureBurstStep(
+                            step + 1, total, capturedFiles, fileName,
+                            rollSnapshot, isFront, reframe, bokeh, look, isAuto
+                        )
+                    } else {
+                        runV4PostProcessing(
+                            capturedFiles, fileName, rollSnapshot, isFront, reframe, bokeh, look, isAuto
+                        )
+                    }
+                }
+
+                override fun onError(exc: ImageCaptureException) {
+                    tempFile.delete()
+                    if (capturedFiles.isNotEmpty()) {
+                        runV4PostProcessing(
+                            capturedFiles, fileName, rollSnapshot, isFront, reframe, bokeh, look, isAuto
+                        )
+                    } else {
+                        isCapturingPhoto = false
+                        updateUIState()
+                        Toast.makeText(this@MainActivity, "Capture failed: ${exc.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        )
+    }
+
+    private fun runV4PostProcessing(
+        files: List<File>,
+        fileName: String,
+        rollSnapshot: Float,
+        isFront: Boolean,
+        reframe: ReframeMode,
+        bokeh: BokehLevel,
+        look: ProLook,
+        isAuto: Boolean
+    ) {
+        showCoachStatus("AI Pro Finishing (Reframe / Bokeh)...", "#80D8FF", 6000L)
+        ioExecutor.execute {
+            var winnerFile: File? = null
+            try {
+                val burstMsg = if (files.size > 1) {
+                    val pick = photoEngine.pickBestBurstShot(files)
+                    winnerFile = pick.winnerFile
+                    "Best #${pick.winnerIndex}/${pick.totalCount} • "
+                } else {
+                    winnerFile = files.first()
+                    ""
+                }
+
+                val summary = photoEngine.processAndSave(
+                    sourceFile = winnerFile!!,
+                    fileName = fileName,
+                    rollDeg = rollSnapshot,
+                    isFrontCamera = isFront,
+                    reframe = reframe,
+                    bokeh = bokeh,
+                    look = look
+                )
+
+                val finalToast = (if (isAuto) "AI Auto! " else "") + burstMsg + summary
+                runOnUiThread {
+                    showCoachStatus(finalToast, "#00FFAA", 2800L)
+                    Toast.makeText(this, finalToast, Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this, "AI Finish error: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            } finally {
+                winnerFile?.delete()
+                files.forEach { if (it.exists()) it.delete() }
+                runOnUiThread {
+                    isCapturingPhoto = false
+                    updateUIState()
+                }
+            }
+        }
+    }
+
+    private fun showCoachStatus(text: String, hexColor: String, holdMs: Long) {
+        lastStatusHoldUntil = System.currentTimeMillis() + holdMs
+        tvCoach.visibility = View.VISIBLE
+        tvCoach.text = text
+        tvCoach.setTextColor(Color.parseColor(hexColor))
+    }
+
+    // ==================== HARDWARE & AI AUTONOMOUS CONTROLS ====================
 
     private fun autoFocusOnFace(normX: Float, normY: Float) {
         val now = System.currentTimeMillis()
@@ -1004,196 +1224,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         c2Control.setCaptureRequestOptions(manualOptions)
     }
 
-    private fun takePhoto(isAuto: Boolean) {
-        val capture = imageCapture ?: return
-        if (isCapturingPhoto) return
-        isCapturingPhoto = true
-
-        val prefix = if (isAuto) "AICAM_AUTO_" else "AICAM_${currentLook.name}_"
-        val fileName = prefix + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
-            .format(System.currentTimeMillis())
-
-        if (currentLook == ProLook.NATURAL) {
-            val contentValues = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
-                    put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/AICam-Pro")
-                }
-            }
-            val outputOptions = ImageCapture.OutputFileOptions.Builder(
-                contentResolver,
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                contentValues
-            ).build()
-
-            capture.takePicture(
-                outputOptions,
-                ContextCompat.getMainExecutor(this),
-                object : ImageCapture.OnImageSavedCallback {
-                    override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                        isCapturingPhoto = false
-                        val msg = if (isAuto) "AI Auto-Clicked!" else "Saved in Gallery/AICam-Pro"
-                        Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
-                    }
-                    override fun onError(exc: ImageCaptureException) {
-                        isCapturingPhoto = false
-                        Toast.makeText(this@MainActivity, "Capture failed: ${exc.message}", Toast.LENGTH_LONG).show()
-                    }
-                }
-            )
-        } else {
-            val tempFile = File(cacheDir, "raw_capture.jpg")
-            val outputOptions = ImageCapture.OutputFileOptions.Builder(tempFile).build()
-            capture.takePicture(
-                outputOptions,
-                ContextCompat.getMainExecutor(this),
-                object : ImageCapture.OnImageSavedCallback {
-                    override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                        ioExecutor.execute {
-                            saveColorGradedPhoto(tempFile, fileName, currentLook, isAuto)
-                        }
-                    }
-                    override fun onError(exc: ImageCaptureException) {
-                        isCapturingPhoto = false
-                        Toast.makeText(this@MainActivity, "Capture failed: ${exc.message}", Toast.LENGTH_LONG).show()
-                    }
-                }
-            )
-        }
-    }
-
-    private fun saveColorGradedPhoto(tempFile: File, fileName: String, look: ProLook, isAuto: Boolean) {
-        try {
-            val exif = ExifInterface(tempFile.absolutePath)
-            val orientation = exif.getAttributeInt(
-                ExifInterface.TAG_ORIENTATION,
-                ExifInterface.ORIENTATION_NORMAL
-            )
-            val rotateDeg = when (orientation) {
-                ExifInterface.ORIENTATION_ROTATE_90 -> 90f
-                ExifInterface.ORIENTATION_ROTATE_180 -> 180f
-                ExifInterface.ORIENTATION_ROTATE_270 -> 270f
-                else -> 0f
-            }
-
-            val src = BitmapFactory.decodeFile(tempFile.absolutePath)
-            if (src == null) throw IllegalStateException("Decode failed")
-
-            val oriented = if (rotateDeg != 0f) {
-                val m = Matrix().apply { postRotate(rotateDeg) }
-                Bitmap.createBitmap(src, 0, 0, src.width, src.height, m, true).also {
-                    if (it !== src) src.recycle()
-                }
-            } else src
-
-            val graded = Bitmap.createBitmap(oriented.width, oriented.height, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(graded)
-            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                colorFilter = ColorMatrixColorFilter(buildLookMatrix(look))
-            }
-            canvas.drawBitmap(oriented, 0f, 0f, paint)
-            oriented.recycle()
-
-            val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
-                    put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/AICam-Pro")
-                }
-            }
-            val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-            if (uri != null) {
-                contentResolver.openOutputStream(uri)?.use { out ->
-                    graded.compress(Bitmap.CompressFormat.JPEG, 94, out)
-                }
-            }
-            graded.recycle()
-            runOnUiThread {
-                val msg = if (isAuto) "AI Auto-Clicked (${look.label})!" else "Saved ${look.label} Look!"
-                Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
-            }
-        } catch (t: Throwable) {
-            // Safe fallback: copy untouched original JPEG so photo is never lost
-            try {
-                val values = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                    if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
-                        put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/AICam-Pro")
-                    }
-                }
-                val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                if (uri != null) {
-                    contentResolver.openOutputStream(uri)?.use { out ->
-                        FileInputStream(tempFile).use { input -> input.copyTo(out) }
-                    }
-                }
-            } catch (_: Throwable) {}
-            runOnUiThread {
-                Toast.makeText(this, "Saved Original Photo", Toast.LENGTH_SHORT).show()
-            }
-        } finally {
-            tempFile.delete()
-            isCapturingPhoto = false
-        }
-    }
-
-    private fun buildLookMatrix(look: ProLook): ColorMatrix {
-        val cm = ColorMatrix()
-        when (look) {
-            ProLook.NOIR_BW -> {
-                cm.setSaturation(0f)
-                val contrast = ColorMatrix(
-                    floatArrayOf(
-                        1.22f, 0f, 0f, 0f, -22f,
-                        0f, 1.22f, 0f, 0f, -22f,
-                        0f, 0f, 1.22f, 0f, -22f,
-                        0f, 0f, 0f, 1f, 0f
-                    )
-                )
-                cm.postConcat(contrast)
-            }
-            ProLook.CINEMATIC -> {
-                cm.setSaturation(0.92f)
-                val cinema = ColorMatrix(
-                    floatArrayOf(
-                        1.10f, 0f, 0f, 0f, -6f,
-                        0f, 1.04f, 0f, 0f, -4f,
-                        0f, 0f, 1.08f, 0f, 4f,
-                        0f, 0f, 0f, 1f, 0f
-                    )
-                )
-                cm.postConcat(cinema)
-            }
-            ProLook.WARM_GOLD -> {
-                cm.setSaturation(1.12f)
-                val warm = ColorMatrix(
-                    floatArrayOf(
-                        1.10f, 0f, 0f, 0f, 8f,
-                        0f, 1.03f, 0f, 0f, 3f,
-                        0f, 0f, 0.90f, 0f, -6f,
-                        0f, 0f, 0f, 1f, 0f
-                    )
-                )
-                cm.postConcat(warm)
-            }
-            ProLook.VIVID -> {
-                cm.setSaturation(1.30f)
-                val pop = ColorMatrix(
-                    floatArrayOf(
-                        1.08f, 0f, 0f, 0f, -8f,
-                        0f, 1.08f, 0f, 0f, -8f,
-                        0f, 0f, 1.08f, 0f, -8f,
-                        0f, 0f, 0f, 1f, 0f
-                    )
-                )
-                cm.postConcat(pop)
-            }
-            ProLook.NATURAL -> {}
-        }
-        return cm
-    }
+    // ==================== VIDEO RECORDING ====================
 
     @SuppressLint("MissingPermission")
     private fun startVideoRecording() {
@@ -1230,9 +1261,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 }
                 is VideoRecordEvent.Status -> {
                     val secs = TimeUnit.NANOSECONDS.toSeconds(event.recordingStats.recordedDurationNanos)
-                    val mm = secs / 60
-                    val ss = secs % 60
-                    tvRecTimer.text = String.format(Locale.US, "● REC %02d:%02d", mm, ss)
+                    tvRecTimer.text = String.format(Locale.US, "● REC %02d:%02d", secs / 60, secs % 60)
                 }
                 is VideoRecordEvent.Finalize -> {
                     isRecording = false
@@ -1254,7 +1283,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         activeRecording = null
     }
 
-    // Optional Free Gemini Vision Creative Director (Live Pro Critique)
+    // ==================== OPTIONAL GEMINI CREATIVE DIRECTOR ====================
+
     private fun getGeminiKey(): String {
         return getSharedPreferences("aicam_prefs", Context.MODE_PRIVATE)
             .getString("gemini_api_key", "") ?: ""
@@ -1267,14 +1297,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
         AlertDialog.Builder(this)
             .setTitle("AI Creative Director (Optional)")
-            .setMessage("Google AI Studio (aistudio.google.com) se apni FREE Gemini API key yahan paste karo. Phir 'AI TIP' dabate hi pro photographer live scene dekh kar Hinglish me pose/light tip dega.")
+            .setMessage("aistudio.google.com se apni FREE Gemini API key paste karo. 'AI TIP' dabate hi pro photographer live scene dekh kar Hinglish me pose/light tip dega.")
             .setView(input)
             .setPositiveButton("Save") { _, _ ->
                 getSharedPreferences("aicam_prefs", Context.MODE_PRIVATE)
                     .edit()
                     .putString("gemini_api_key", input.text.toString().trim())
                     .apply()
-                Toast.makeText(this, "AI Director Key Saved! Ab 'AI TIP' dabao", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Key Saved! Ab 'AI TIP' dabao", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -1286,9 +1316,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             Toast.makeText(this, "Camera preview ready nahi hai", Toast.LENGTH_SHORT).show()
             return
         }
-        tvCoach.text = "AI Director scene dekh raha hai..."
-        tvCoach.setTextColor(Color.parseColor("#80D8FF"))
-        lastDirectorTipUntil = System.currentTimeMillis() + 8000L
+        showCoachStatus("AI Director scene dekh raha hai...", "#80D8FF", 8000L)
 
         ioExecutor.execute {
             try {
@@ -1337,12 +1365,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 val respText = stream.bufferedReader().use { it.readText() }
                 conn.disconnect()
 
-                if (conn.responseCode !in 200..299) {
-                    throw IllegalStateException("API ${conn.responseCode}")
-                }
+                if (conn.responseCode !in 200..299) throw IllegalStateException("API ${conn.responseCode}")
 
-                val json = JSONObject(respText)
-                val tip = json.getJSONArray("candidates")
+                val tip = JSONObject(respText)
+                    .getJSONArray("candidates")
                     .getJSONObject(0)
                     .getJSONObject("content")
                     .getJSONArray("parts")
@@ -1350,16 +1376,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     .getString("text")
                     .trim()
 
-                lastDirectorTipUntil = System.currentTimeMillis() + 7000L
                 runOnUiThread {
-                    tvCoach.text = "Director: $tip"
-                    tvCoach.setTextColor(Color.parseColor("#80D8FF"))
+                    showCoachStatus("Director: $tip", "#80D8FF", 7000L)
                     speakTip(tip)
                 }
             } catch (e: Exception) {
-                lastDirectorTipUntil = 0L
+                lastStatusHoldUntil = 0L
                 runOnUiThread {
-                    Toast.makeText(this, "AI Director error (${e.message}). Long-press AI TIP to check key.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "AI Director error (${e.message}). Long-press AI TIP to edit key.", Toast.LENGTH_LONG).show()
                 }
             }
         }
