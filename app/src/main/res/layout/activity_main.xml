@@ -2,7 +2,7 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#000000">
+    android:background="#09090B">
 
     <androidx.camera.view.PreviewView
         android:id="@+id/previewView"
@@ -14,80 +14,81 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- Top HUD + AI Coach -->
+    <!-- TOP FLOATING GEN-Z GLASS HUD -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="top"
-        android:orientation="vertical">
+        android:orientation="vertical"
+        android:paddingStart="14dp"
+        android:paddingTop="40dp"
+        android:paddingEnd="14dp">
 
         <LinearLayout
+            android:id="@+id/topPillBar"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="#AA000000"
+            android:layout_height="44dp"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingStart="10dp"
-            android:paddingTop="34dp"
-            android:paddingEnd="8dp"
-            android:paddingBottom="6dp">
+            android:paddingStart="12dp"
+            android:paddingEnd="8dp">
 
             <TextView
                 android:id="@+id/tvBadge"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="AI PRO V4 | Ready"
-                android:textColor="#00FFAA"
-                android:textSize="12sp"
-                android:textStyle="bold" />
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:letterSpacing="0.04"
+                android:maxLines="1"
+                android:text="● AI DSLR V5"
+                android:textColor="#CCFF00"
+                android:textSize="11sp" />
 
-            <Button
+            <TextView
                 android:id="@+id/btnFlash"
-                style="?android:attr/buttonBarButtonStyle"
                 android:layout_width="wrap_content"
-                android:layout_height="38dp"
-                android:minWidth="0dp"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp"
-                android:text="FL:A"
-                android:textColor="#FFD54F"
+                android:layout_height="30dp"
+                android:layout_marginStart="6dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:text="⚡A"
+                android:textColor="#FFD166"
                 android:textSize="11sp" />
 
-            <Button
-                android:id="@+id/btnDirector"
-                style="?android:attr/buttonBarButtonStyle"
+            <TextView
+                android:id="@+id/btnApiKey"
                 android:layout_width="wrap_content"
-                android:layout_height="38dp"
-                android:minWidth="0dp"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp"
-                android:text="AI TIP"
-                android:textColor="#80D8FF"
+                android:layout_height="30dp"
+                android:layout_marginStart="6dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:text="✦ API"
+                android:textColor="#FFFFFF"
                 android:textSize="11sp" />
 
-            <Button
+            <TextView
                 android:id="@+id/btnSpecs"
-                style="?android:attr/buttonBarButtonStyle"
                 android:layout_width="wrap_content"
-                android:layout_height="38dp"
-                android:minWidth="0dp"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp"
+                android:layout_height="30dp"
+                android:layout_marginStart="6dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
                 android:text="DNA"
-                android:textColor="#FFFFFF"
-                android:textSize="11sp" />
-
-            <Button
-                android:id="@+id/btnFlip"
-                style="?android:attr/buttonBarButtonStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="38dp"
-                android:minWidth="0dp"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp"
-                android:text="FLIP"
-                android:textColor="#FFFFFF"
+                android:textColor="#D4D4D8"
                 android:textSize="11sp" />
         </LinearLayout>
 
@@ -96,16 +97,32 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center_horizontal"
-            android:layout_marginTop="6dp"
-            android:background="#CCDD2C00"
+            android:layout_marginTop="8dp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.08"
             android:paddingStart="14dp"
-            android:paddingTop="4dp"
+            android:paddingTop="5dp"
             android:paddingEnd="14dp"
-            android:paddingBottom="4dp"
+            android:paddingBottom="5dp"
             android:text="● REC 00:00"
             android:textColor="#FFFFFF"
-            android:textSize="13sp"
-            android:textStyle="bold"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/tvAiStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="8dp"
+            android:fontFamily="sans-serif-medium"
+            android:paddingStart="14dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="6dp"
+            android:text="✦ AI STUDIO PROCESSING..."
+            android:textColor="#09090B"
+            android:textSize="11sp"
             android:visibility="gone" />
 
         <TextView
@@ -113,149 +130,47 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center_horizontal"
-            android:layout_marginStart="16dp"
             android:layout_marginTop="8dp"
-            android:layout_marginEnd="16dp"
-            android:background="#CC111111"
+            android:fontFamily="sans-serif-medium"
             android:gravity="center"
             android:paddingStart="14dp"
-            android:paddingTop="7dp"
+            android:paddingTop="6dp"
             android:paddingEnd="14dp"
-            android:paddingBottom="7dp"
-            android:text="AI Photographer V4 Active"
-            android:textColor="#FFFFFF"
-            android:textSize="13sp"
-            android:textStyle="bold" />
+            android:paddingBottom="6dp"
+            android:text="AI DSLR Brain Ready (Human &amp; Object)"
+            android:textColor="#F4F4F5"
+            android:textSize="12sp" />
     </LinearLayout>
 
-    <!-- Bottom Controls -->
+    <!-- BOTTOM GEN-Z FLOATING CONTROL DECK -->
     <LinearLayout
+        android:id="@+id/bottomDeck"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        android:background="#C8000000"
         android:orientation="vertical"
-        android:paddingStart="10dp"
-        android:paddingTop="6dp"
-        android:paddingEnd="10dp"
-        android:paddingBottom="12dp">
+        android:paddingStart="12dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="24dp">
 
-        <!-- Row 1: AI Brain Toggles -->
-        <LinearLayout
-            android:id="@+id/aiToggleRow"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center"
-            android:orientation="horizontal">
-
-            <Button
-                android:id="@+id/btnVoice"
-                style="?android:attr/buttonBarButtonStyle"
-                android:layout_width="0dp"
-                android:layout_height="32dp"
-                android:layout_weight="1"
-                android:minWidth="0dp"
-                android:padding="0dp"
-                android:text="VOICE:ON"
-                android:textColor="#00FFAA"
-                android:textSize="10sp" />
-
-            <Button
-                android:id="@+id/btnAutoClick"
-                style="?android:attr/buttonBarButtonStyle"
-                android:layout_width="0dp"
-                android:layout_height="32dp"
-                android:layout_weight="1"
-                android:minWidth="0dp"
-                android:padding="0dp"
-                android:text="AUTO:ON"
-                android:textColor="#00FFAA"
-                android:textSize="10sp" />
-
-            <Button
-                android:id="@+id/btnAutoZoom"
-                style="?android:attr/buttonBarButtonStyle"
-                android:layout_width="0dp"
-                android:layout_height="32dp"
-                android:layout_weight="1"
-                android:minWidth="0dp"
-                android:padding="0dp"
-                android:text="ZOOM:ON"
-                android:textColor="#00FFAA"
-                android:textSize="10sp" />
-
-            <Button
-                android:id="@+id/btnBurst"
-                style="?android:attr/buttonBarButtonStyle"
-                android:layout_width="0dp"
-                android:layout_height="32dp"
-                android:layout_weight="1"
-                android:minWidth="0dp"
-                android:padding="0dp"
-                android:text="BURST:OFF"
-                android:textColor="#AAAAAA"
-                android:textSize="10sp" />
-        </LinearLayout>
-
-        <!-- Row 2: V4 Pro Finishing (iPhone Reframe + DSLR Bokeh + Color Look) -->
-        <LinearLayout
-            android:id="@+id/proFinishRow"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center"
-            android:orientation="horizontal">
-
-            <Button
-                android:id="@+id/btnReframe"
-                style="?android:attr/buttonBarButtonStyle"
-                android:layout_width="0dp"
-                android:layout_height="32dp"
-                android:layout_weight="1"
-                android:minWidth="0dp"
-                android:padding="0dp"
-                android:text="REFR:OFF"
-                android:textColor="#AAAAAA"
-                android:textSize="10sp" />
-
-            <Button
-                android:id="@+id/btnBokeh"
-                style="?android:attr/buttonBarButtonStyle"
-                android:layout_width="0dp"
-                android:layout_height="32dp"
-                android:layout_weight="1"
-                android:minWidth="0dp"
-                android:padding="0dp"
-                android:text="BLUR:OFF"
-                android:textColor="#AAAAAA"
-                android:textSize="10sp" />
-
-            <Button
-                android:id="@+id/btnLook"
-                style="?android:attr/buttonBarButtonStyle"
-                android:layout_width="0dp"
-                android:layout_height="32dp"
-                android:layout_weight="1"
-                android:minWidth="0dp"
-                android:padding="0dp"
-                android:text="NATURAL"
-                android:textColor="#FFD54F"
-                android:textSize="10sp" />
-        </LinearLayout>
-
-        <!-- Manual DSLR Controls -->
+        <!-- Manual DSLR Glass Drawer -->
         <LinearLayout
             android:id="@+id/manualPanel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"
             android:orientation="vertical"
+            android:padding="12dp"
             android:visibility="gone">
 
             <TextView
                 android:id="@+id/tvIso"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="ISO: Auto"
-                android:textColor="#FFFFFF"
+                android:fontFamily="sans-serif-medium"
+                android:text="ISO AUTO"
+                android:textColor="#CCFF00"
                 android:textSize="11sp" />
 
             <SeekBar
@@ -269,8 +184,10 @@
                 android:id="@+id/tvShutter"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Shutter: Auto"
-                android:textColor="#FFFFFF"
+                android:layout_marginTop="4dp"
+                android:fontFamily="sans-serif-medium"
+                android:text="SHUTTER AUTO"
+                android:textColor="#CCFF00"
                 android:textSize="11sp" />
 
             <SeekBar
@@ -281,60 +198,338 @@
                 android:progress="5" />
         </LinearLayout>
 
-        <TextView
-            android:id="@+id/tvZoom"
-            android:layout_width="wrap_content"
+        <!-- Quick Zoom Pills -->
+        <LinearLayout
+            android:id="@+id/zoomRow"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Zoom: 1.0x"
-            android:textColor="#CCCCCC"
-            android:textSize="11sp" />
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingBottom="6dp">
+
+            <TextView
+                android:id="@+id/btnZ1"
+                android:layout_width="38dp"
+                android:layout_height="28dp"
+                android:layout_marginEnd="6dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:text="1x"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/btnZ15"
+                android:layout_width="38dp"
+                android:layout_height="28dp"
+                android:layout_marginEnd="6dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:text="1.5x"
+                android:textColor="#D4D4D8"
+                android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/btnZ2"
+                android:layout_width="38dp"
+                android:layout_height="28dp"
+                android:layout_marginEnd="6dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:text="2x"
+                android:textColor="#D4D4D8"
+                android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/btnZ3"
+                android:layout_width="38dp"
+                android:layout_height="28dp"
+                android:layout_marginEnd="10dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:text="3x"
+                android:textColor="#D4D4D8"
+                android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/tvZoom"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-medium"
+                android:text="1.0x"
+                android:textColor="#A1A1AA"
+                android:textSize="11sp" />
+        </LinearLayout>
 
         <SeekBar
             android:id="@+id/seekZoom"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="20dp"
+            android:layout_marginBottom="8dp"
             android:max="100"
             android:progress="0" />
 
-        <!-- Primary Action Bar -->
+        <!-- Horizontal Swipeable Gen-Z Pro Chips -->
+        <HorizontalScrollView
+            android:id="@+id/chipScroll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:clipToPadding="false"
+            android:overScrollMode="never"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="2dp"
+                android:paddingEnd="8dp">
+
+                <TextView
+                    android:id="@+id/btnAiStudio"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:layout_marginEnd="8dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="✦ AI STUDIO"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/btnReframe"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:layout_marginEnd="8dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="REFR OFF"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/btnBokeh"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:layout_marginEnd="8dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="BLUR OFF"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/btnBurst"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:layout_marginEnd="8dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="BURST OFF"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/btnLook"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:layout_marginEnd="8dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="NATURAL"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/btnAutoClick"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:layout_marginEnd="8dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="AUTO CLICK"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/btnVoice"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:layout_marginEnd="8dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="VOICE"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/btnAutoZoom"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:layout_marginEnd="8dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="AI ZOOM"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/btnDirector"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="✦ LIVE TIP"
+                    android:textSize="11sp" />
+            </LinearLayout>
+        </HorizontalScrollView>
+
+        <!-- Clean Mode Tabs -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
+            android:layout_marginBottom="12dp"
             android:gravity="center"
             android:orientation="horizontal">
 
-            <Button
-                android:id="@+id/btnPhotoVideo"
-                android:layout_width="0dp"
-                android:layout_height="46dp"
-                android:layout_weight="1"
-                android:text="PHOTO"
+            <TextView
+                android:id="@+id/tabPhoto"
+                android:layout_width="wrap_content"
+                android:layout_height="30dp"
+                android:layout_marginEnd="14dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:letterSpacing="0.08"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
+                android:text="AI DSLR"
                 android:textSize="11sp" />
 
-            <View
-                android:layout_width="8dp"
-                android:layout_height="1dp" />
-
-            <Button
-                android:id="@+id/btnCapture"
-                android:layout_width="0dp"
-                android:layout_height="52dp"
-                android:layout_weight="1.35"
-                android:text="CAPTURE"
-                android:textStyle="bold" />
-
-            <View
-                android:layout_width="8dp"
-                android:layout_height="1dp" />
-
-            <Button
-                android:id="@+id/btnMode"
-                android:layout_width="0dp"
-                android:layout_height="46dp"
-                android:layout_weight="1"
-                android:text="AI PRO"
+            <TextView
+                android:id="@+id/tabVideo"
+                android:layout_width="wrap_content"
+                android:layout_height="30dp"
+                android:layout_marginEnd="14dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:letterSpacing="0.08"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
+                android:text="VIDEO"
                 android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/tabPro"
+                android:layout_width="wrap_content"
+                android:layout_height="30dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:letterSpacing="0.08"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
+                android:text="MANUAL"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- Tactile Shutter Row (Gallery | Shutter Ring | Flip) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="78dp"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <FrameLayout
+                android:id="@+id/btnGalleryWrap"
+                android:layout_width="50dp"
+                android:layout_height="50dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:padding="2dp">
+
+                <ImageView
+                    android:id="@+id/ivGalleryThumb"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:contentDescription="Gallery"
+                    android:scaleType="centerCrop" />
+            </FrameLayout>
+
+            <View
+                android:layout_width="42dp"
+                android:layout_height="1dp" />
+
+            <FrameLayout
+                android:id="@+id/btnCaptureOuter"
+                android:layout_width="76dp"
+                android:layout_height="76dp"
+                android:clickable="true"
+                android:focusable="true">
+
+                <View
+                    android:id="@+id/vCaptureInner"
+                    android:layout_width="60dp"
+                    android:layout_height="60dp"
+                    android:layout_gravity="center" />
+            </FrameLayout>
+
+            <View
+                android:layout_width="42dp"
+                android:layout_height="1dp" />
+
+            <TextView
+                android:id="@+id/btnFlip"
+                android:layout_width="50dp"
+                android:layout_height="50dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:text="↻"
+                android:textColor="#FFFFFF"
+                android:textSize="24sp" />
         </LinearLayout>
     </LinearLayout>
 
