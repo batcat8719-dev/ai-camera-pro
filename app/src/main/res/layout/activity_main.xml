@@ -37,7 +37,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="AI PRO V3 | Ready"
+                android:text="AI PRO V4 | Ready"
                 android:textColor="#00FFAA"
                 android:textSize="12sp"
                 android:textStyle="bold" />
@@ -122,7 +122,7 @@
             android:paddingTop="7dp"
             android:paddingEnd="14dp"
             android:paddingBottom="7dp"
-            android:text="AI Photographer Brain Active"
+            android:text="AI Photographer V4 Active"
             android:textColor="#FFFFFF"
             android:textSize="13sp"
             android:textStyle="bold" />
@@ -133,14 +133,14 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        android:background="#C4000000"
+        android:background="#C8000000"
         android:orientation="vertical"
-        android:paddingStart="12dp"
-        android:paddingTop="8dp"
-        android:paddingEnd="12dp"
-        android:paddingBottom="14dp">
+        android:paddingStart="10dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="10dp"
+        android:paddingBottom="12dp">
 
-        <!-- AI Quick Feature Strip -->
+        <!-- Row 1: AI Brain Toggles -->
         <LinearLayout
             android:id="@+id/aiToggleRow"
             android:layout_width="match_parent"
@@ -152,7 +152,7 @@
                 android:id="@+id/btnVoice"
                 style="?android:attr/buttonBarButtonStyle"
                 android:layout_width="0dp"
-                android:layout_height="34dp"
+                android:layout_height="32dp"
                 android:layout_weight="1"
                 android:minWidth="0dp"
                 android:padding="0dp"
@@ -164,7 +164,7 @@
                 android:id="@+id/btnAutoClick"
                 style="?android:attr/buttonBarButtonStyle"
                 android:layout_width="0dp"
-                android:layout_height="34dp"
+                android:layout_height="32dp"
                 android:layout_weight="1"
                 android:minWidth="0dp"
                 android:padding="0dp"
@@ -176,7 +176,7 @@
                 android:id="@+id/btnAutoZoom"
                 style="?android:attr/buttonBarButtonStyle"
                 android:layout_width="0dp"
-                android:layout_height="34dp"
+                android:layout_height="32dp"
                 android:layout_weight="1"
                 android:minWidth="0dp"
                 android:padding="0dp"
@@ -185,10 +185,55 @@
                 android:textSize="10sp" />
 
             <Button
+                android:id="@+id/btnBurst"
+                style="?android:attr/buttonBarButtonStyle"
+                android:layout_width="0dp"
+                android:layout_height="32dp"
+                android:layout_weight="1"
+                android:minWidth="0dp"
+                android:padding="0dp"
+                android:text="BURST:OFF"
+                android:textColor="#AAAAAA"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <!-- Row 2: V4 Pro Finishing (iPhone Reframe + DSLR Bokeh + Color Look) -->
+        <LinearLayout
+            android:id="@+id/proFinishRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnReframe"
+                style="?android:attr/buttonBarButtonStyle"
+                android:layout_width="0dp"
+                android:layout_height="32dp"
+                android:layout_weight="1"
+                android:minWidth="0dp"
+                android:padding="0dp"
+                android:text="REFR:OFF"
+                android:textColor="#AAAAAA"
+                android:textSize="10sp" />
+
+            <Button
+                android:id="@+id/btnBokeh"
+                style="?android:attr/buttonBarButtonStyle"
+                android:layout_width="0dp"
+                android:layout_height="32dp"
+                android:layout_weight="1"
+                android:minWidth="0dp"
+                android:padding="0dp"
+                android:text="BLUR:OFF"
+                android:textColor="#AAAAAA"
+                android:textSize="10sp" />
+
+            <Button
                 android:id="@+id/btnLook"
                 style="?android:attr/buttonBarButtonStyle"
                 android:layout_width="0dp"
-                android:layout_height="34dp"
+                android:layout_height="32dp"
                 android:layout_weight="1"
                 android:minWidth="0dp"
                 android:padding="0dp"
@@ -255,14 +300,14 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="6dp"
             android:gravity="center"
             android:orientation="horizontal">
 
             <Button
                 android:id="@+id/btnPhotoVideo"
                 android:layout_width="0dp"
-                android:layout_height="48dp"
+                android:layout_height="46dp"
                 android:layout_weight="1"
                 android:text="PHOTO"
                 android:textSize="11sp" />
@@ -274,7 +319,7 @@
             <Button
                 android:id="@+id/btnCapture"
                 android:layout_width="0dp"
-                android:layout_height="54dp"
+                android:layout_height="52dp"
                 android:layout_weight="1.35"
                 android:text="CAPTURE"
                 android:textStyle="bold" />
@@ -286,7 +331,7 @@
             <Button
                 android:id="@+id/btnMode"
                 android:layout_width="0dp"
-                android:layout_height="48dp"
+                android:layout_height="46dp"
                 android:layout_weight="1"
                 android:text="AI PRO"
                 android:textSize="11sp" />
