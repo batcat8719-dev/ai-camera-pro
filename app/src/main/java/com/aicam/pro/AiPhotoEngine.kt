@@ -13,17 +13,27 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.Rect
 import android.graphics.RectF
+import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.util.Base64
 import androidx.exifinterface.media.ExifInterface
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.FaceDetector
+import com.google.mlkit.vision.objects.ObjectDetection
+import com.google.mlkit.vision.objects.ObjectDetector
+import com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions
 import com.google.mlkit.vision.segmentation.Segmentation
 import com.google.mlkit.vision.segmentation.Segmenter
 import com.google.mlkit.vision.segmentation.selfie.SelfieSegmenterOptions
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
@@ -39,16 +49,18 @@ enum class ProLook(val label: String) {
 }
 
 enum class ReframeMode(val label: String, val ratio: Float) {
-    OFF("REFR:OFF", 0f),
-    PORTRAIT_4_5("REFR:4:5", 4f / 5f),
-    STORY_9_16("REFR:9:16", 9f / 16f),
-    CLASSIC_3_4("REFR:3:4", 3f / 4f)
+    OFF("REFR OFF", 0f),
+    PORTRAIT_4_5("REFR 4:5", 4f / 5f),
+    STORY_9_16("REFR 9:16", 9f / 16f),
+    CLASSIC_3_4("REFR 3:4", 3f / 4f)
 }
 
-enum class BokehLevel(val label: String, val downScale: Int, val radius: Int) {
-    OFF("BLUR:OFF", 1, 0),
-    SOFT_F2("BLUR:f/2.0", 4, 5),
-    PRO_F14("BLUR:f/1.4", 6, 9)
+// Natural, realistic DSLR aperture depth (no artificial over-blur!)
+enum class BokehLevel(val label: String, val downScale: Int, val radius: Int, val passes: Int) {
+    OFF("BLUR OFF", 1, 0, 0),
+    NATURAL_F4("f/4.0", 2, 2, 2),
+    PORTRAIT_F28("f/2.8", 2, 4, 2),
+    CREAMY_F18("f/1.8", 3, 5, 2)
 }
 
 data class BurstPickResult(
@@ -57,10 +69,49 @@ data class BurstPickResult(
     val totalCount: Int
 )
 
+data class SaveOutcome(
+    val summary: String,
+    val uri: Uri?
+)
+
+data class AiStudioOutcome(
+    val success: Boolean,
+    val message: String,
+    val uri: Uri?
+)
+
 class AiPhotoEngine(
     private val context: Context,
     private val faceDetector: FaceDetector
 ) {
+
+    companion object {
+        const val DEFAULT_STUDIO_MODEL = "gemini-2.5-flash-image"
+
+        val DEFAULT_STUDIO_PROMPT = """
+Use the reference photo as a strict anchor: identical face, identical pose, identical clothing, identical background, identical lighting direction and colour temperature. Slight natural facial asymmetry preserved. Do not change identity or pose.
+
+Camera look: modern flagship smartphone main camera, 24mm equivalent, natural computational HDR, clean but believable phone photography. Focus locked on the nearest eye, eyelashes crisp, ears and background slightly softer. Natural computational depth with soft subject edges (no cut-out halo). Slight edge sharpness falloff, subtle micro-vignetting, minimal chromatic aberration.
+
+Light: single dominant source consistent with the reference. Soft contact shadows where cloth meets skin. Gentle fill on the shadow side of the face. Light wrap on hair and shoulder edges. Small controlled specular highlights on forehead, nose tip and cheekbones. Filmic highlight roll-off. Deep but not crushed shadows.
+
+Skin: visible pores, peach fuzz visible in rim light, natural T-zone sheen, lip creases, real under-eye texture, nasolabial folds, slight uneven skin tone, subtle subsurface scattering. Mild micro-contrast only — no uniform sharpening, no smoothing.
+
+Eyes: catchlight shaped like the actual light source, wet corneal reflection, visible iris fibers, faint sclera capillaries, individual lashes. No glassy or dead eyes.
+
+Hair and fabric: individual flyaway strands, strand-level highlights, true fabric weave, visible stitching, natural creases and thread fuzz.
+
+Color: skin hue stays in the natural red-brown / wheatish range of the reference photo. No orange cast, no grey-yellow cast. Consistent white balance across the whole scene. Natural saturation. Slightly warm real-life tone. Mid-tones gently lifted so the face reads clearly on small phone screens.
+
+Sensor: fine luminance grain in the shadows, no chroma noise.
+
+Anatomy: five fingers on each hand, natural nails, correct proportions. No extra people or objects. No readable text in the background.
+
+Output: 4:5 portrait (Instagram feed ready), 4K resolution, clean, sharp, ready to post directly. No text, no watermark, no border, no UI elements.
+
+Avoid: waxy skin, plastic skin, airbrushed skin, beauty filter, dead eyes, HDR halo, over-sharpened look, oil-painting look, uncanny perfect symmetry, extra fingers, AI gloss, artificial glow, CGI, 3D render, oversaturated colors, identity drift, pose change, smoothed skin, flat lighting.
+        """.trimIndent()
+    }
 
     private val segmenter: Segmenter = Segmentation.getClient(
         SelfieSegmenterOptions.Builder()
@@ -69,18 +120,165 @@ class AiPhotoEngine(
             .build()
     )
 
+    private val singleObjectDetector: ObjectDetector = ObjectDetection.getClient(
+        ObjectDetectorOptions.Builder()
+            .setDetectorMode(ObjectDetectorOptions.SINGLE_IMAGE_MODE)
+            .build()
+    )
+
     fun close() {
         segmenter.close()
+        singleObjectDetector.close()
     }
 
-    /**
-     * Evaluates a burst of photos for Focus Sharpness (Laplacian variance),
-     * Open Eyes, and Natural Smile, returning the single best photo.
-     */
-    fun pickBestBurstShot(files: List<File>): BurstPickResult {
-        if (files.size <= 1) {
-            return BurstPickResult(files.first(), 1, files.size)
+    // ==================== AI STUDIO API (STRICT PHOTOREALISM ANCHOR) ====================
+
+    fun enhanceWithAiStudioApi(
+        sourceFile: File,
+        fileName: String,
+        apiKey: String,
+        modelId: String
+    ): AiStudioOutcome {
+        val oriented = decodeOrientedBitmap(sourceFile, maxDim = 1536)
+            ?: return AiStudioOutcome(false, "Image read failed", null)
+
+        val base64Input = try {
+            val baos = ByteArrayOutputStream()
+            oriented.compress(Bitmap.CompressFormat.JPEG, 92, baos)
+            Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+        } finally {
+            oriented.recycle()
         }
+
+        val cleanModel = modelId.ifBlank { DEFAULT_STUDIO_MODEL }.trim()
+        val firstTry = callGeminiImageEndpoint(cleanModel, apiKey, base64Input, includeImageConfig = true)
+        val result = if (!firstTry.success && firstTry.httpCode == 400) {
+            callGeminiImageEndpoint(cleanModel, apiKey, base64Input, includeImageConfig = false)
+        } else {
+            firstTry
+        }
+
+        if (!result.success || result.imageBytes == null) {
+            return AiStudioOutcome(false, result.errorMsg, null)
+        }
+
+        val savedUri = saveRawImageBytesToGallery(
+            bytes = result.imageBytes,
+            mimeType = result.mimeType,
+            fileName = "${fileName}_STUDIO"
+        )
+        return if (savedUri != null) {
+            AiStudioOutcome(true, "✦ AI Studio 4:5 Saved!", savedUri)
+        } else {
+            AiStudioOutcome(false, "Gallery save failed", null)
+        }
+    }
+
+    private data class RawApiResult(
+        val success: Boolean,
+        val httpCode: Int,
+        val imageBytes: ByteArray?,
+        val mimeType: String,
+        val errorMsg: String
+    )
+
+    private fun callGeminiImageEndpoint(
+        modelId: String,
+        apiKey: String,
+        base64Input: String,
+        includeImageConfig: Boolean
+    ): RawApiResult {
+        var conn: HttpURLConnection? = null
+        return try {
+            val genConfig = JSONObject().put(
+                "responseModalities",
+                JSONArray().put("TEXT").put("IMAGE")
+            )
+            if (includeImageConfig) {
+                genConfig.put("imageConfig", JSONObject().put("aspectRatio", "4:5"))
+            }
+
+            val body = JSONObject()
+                .put(
+                    "contents",
+                    JSONArray().put(
+                        JSONObject().put(
+                            "parts",
+                            JSONArray()
+                                .put(JSONObject().put("text", DEFAULT_STUDIO_PROMPT))
+                                .put(
+                                    JSONObject().put(
+                                        "inlineData",
+                                        JSONObject()
+                                            .put("mimeType", "image/jpeg")
+                                            .put("data", base64Input)
+                                    )
+                                )
+                        )
+                    )
+                )
+                .put("generationConfig", genConfig)
+
+            val url = URL("https://generativelanguage.googleapis.com/v1beta/models/$modelId:generateContent?key=$apiKey")
+            conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 15000
+                readTimeout = 90000
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json")
+            }
+            conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val respText = stream?.bufferedReader()?.use { it.readText() } ?: ""
+
+            if (code !in 200..299) {
+                val apiErr = try {
+                    JSONObject(respText).optJSONObject("error")?.optString("message") ?: "HTTP $code"
+                } catch (_: Exception) {
+                    "HTTP $code"
+                }
+                return RawApiResult(false, code, null, "image/jpeg", "API $code: ${apiErr.take(90)}")
+            }
+
+            val root = JSONObject(respText)
+            val candidates = root.optJSONArray("candidates")
+                ?: return RawApiResult(false, code, null, "image/jpeg", "No candidates returned")
+            if (candidates.length() == 0) {
+                return RawApiResult(false, code, null, "image/jpeg", "Empty AI response")
+            }
+
+            val parts = candidates.getJSONObject(0)
+                .optJSONObject("content")
+                ?.optJSONArray("parts")
+                ?: return RawApiResult(false, code, null, "image/jpeg", "No content parts")
+
+            for (i in 0 until parts.length()) {
+                val part = parts.getJSONObject(i)
+                val inline = part.optJSONObject("inlineData") ?: part.optJSONObject("inline_data")
+                if (inline != null) {
+                    val dataStr = inline.optString("data", "")
+                    val mime = inline.optString("mimeType", inline.optString("mime_type", "image/jpeg"))
+                    if (dataStr.isNotEmpty()) {
+                        val bytes = Base64.decode(dataStr, Base64.DEFAULT)
+                        return RawApiResult(true, code, bytes, mime, "OK")
+                    }
+                }
+            }
+
+            RawApiResult(false, code, null, "image/jpeg", "Model returned text only (check Model ID)")
+        } catch (e: Exception) {
+            RawApiResult(false, -1, null, "image/jpeg", e.message ?: "Network error")
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
+    // ==================== BEST-SHOT BURST PICKER (HUMANS + OBJECTS) ====================
+
+    fun pickBestBurstShot(files: List<File>): BurstPickResult {
+        if (files.size <= 1) return BurstPickResult(files.first(), 1, files.size)
 
         var bestIndex = 0
         var bestScore = Double.NEGATIVE_INFINITY
@@ -89,15 +287,17 @@ class AiPhotoEngine(
             val f = files[i]
             val thumb = decodeOrientedBitmap(f, maxDim = 480) ?: continue
             try {
-                val faces = try {
+                val rawFaces = try {
                     Tasks.await(faceDetector.process(InputImage.fromBitmap(thumb, 0)))
                 } catch (_: Exception) {
                     emptyList()
                 }
+                val validFaces = rawFaces.filter {
+                    it.leftEyeOpenProbability != null && it.rightEyeOpenProbability != null
+                }
 
-                // Measure sharpness over face area if present, else center 60% of frame
-                val focusRect = if (faces.isNotEmpty()) {
-                    val b = faces.maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }!!.boundingBox
+                val focusRect = if (validFaces.isNotEmpty()) {
+                    val b = validFaces.maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }!!.boundingBox
                     Rect(
                         b.left.coerceIn(1, thumb.width - 2),
                         b.top.coerceIn(1, thumb.height - 2),
@@ -105,28 +305,43 @@ class AiPhotoEngine(
                         b.bottom.coerceIn(2, thumb.height - 1)
                     )
                 } else {
-                    Rect(
-                        (thumb.width * 0.2f).toInt().coerceAtLeast(1),
-                        (thumb.height * 0.2f).toInt().coerceAtLeast(1),
-                        (thumb.width * 0.8f).toInt().coerceAtMost(thumb.width - 1),
-                        (thumb.height * 0.8f).toInt().coerceAtMost(thumb.height - 1)
-                    )
+                    val objs = try {
+                        Tasks.await(singleObjectDetector.process(InputImage.fromBitmap(thumb, 0)))
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                    if (objs.isNotEmpty()) {
+                        val b = objs.first().boundingBox
+                        Rect(
+                            b.left.coerceIn(1, thumb.width - 2),
+                            b.top.coerceIn(1, thumb.height - 2),
+                            b.right.coerceIn(2, thumb.width - 1),
+                            b.bottom.coerceIn(2, thumb.height - 1)
+                        )
+                    } else {
+                        Rect(
+                            (thumb.width * 0.2f).toInt().coerceAtLeast(1),
+                            (thumb.height * 0.2f).toInt().coerceAtLeast(1),
+                            (thumb.width * 0.8f).toInt().coerceAtMost(thumb.width - 1),
+                            (thumb.height * 0.8f).toInt().coerceAtMost(thumb.height - 1)
+                        )
+                    }
                 }
 
                 val sharpness = computeSharpnessScore(thumb, focusRect)
                 var expressionBonus = 0.0
 
-                if (faces.isNotEmpty()) {
+                if (validFaces.isNotEmpty()) {
                     var allEyesOpen = true
                     var smileSum = 0.0
-                    for (face in faces) {
+                    for (face in validFaces) {
                         val le = face.leftEyeOpenProbability ?: 0.8f
                         val re = face.rightEyeOpenProbability ?: 0.8f
-                        if (le < 0.52f || re < 0.52f) allEyesOpen = false
+                        if (le < 0.35f && re < 0.35f) allEyesOpen = false
                         smileSum += (face.smilingProbability ?: 0.3f)
                     }
                     expressionBonus += if (allEyesOpen) 45.0 else -60.0
-                    expressionBonus += (smileSum / faces.size) * 18.0
+                    expressionBonus += (smileSum / validFaces.size) * 18.0
                 }
 
                 val total = sharpness + expressionBonus
@@ -139,20 +354,14 @@ class AiPhotoEngine(
             }
         }
 
-        // Delete losing burst frames immediately to save space
         for (i in files.indices) {
             if (i != bestIndex) files[i].delete()
         }
         return BurstPickResult(files[bestIndex], bestIndex + 1, files.size)
     }
 
-    /**
-     * Full V4 AI Finishing Pipeline:
-     * 1. Auto-Straighten & iPhone-style Smart Reframe
-     * 2. AI DSLR Background Blur (Portrait Bokeh)
-     * 3. Pro Color Grading LUT
-     * 4. Save to Gallery (Pictures/AICam-Pro)
-     */
+    // ==================== LOCAL DSLR FINISHING PIPELINE ====================
+
     fun processAndSave(
         sourceFile: File,
         fileName: String,
@@ -161,43 +370,42 @@ class AiPhotoEngine(
         reframe: ReframeMode,
         bokeh: BokehLevel,
         look: ProLook
-    ): String {
+    ): SaveOutcome {
         val needsProcessing = (reframe != ReframeMode.OFF || bokeh != BokehLevel.OFF || look != ProLook.NATURAL)
 
         if (!needsProcessing) {
-            saveFileDirectlyToGallery(sourceFile, fileName)
-            return "Saved Original HD"
+            val uri = saveFileDirectlyToGallery(sourceFile, fileName)
+            return SaveOutcome("Saved HD", uri)
         }
 
         var current: Bitmap? = null
         val appliedTags = mutableListOf<String>()
 
         try {
-            // Decode safely up to ~2048px longest edge (ultra crisp + zero OOM crash)
             current = decodeOrientedBitmap(sourceFile, maxDim = 2048)
                 ?: throw IllegalStateException("Bitmap decode failed")
 
-            // Step 1: iPhone-style Auto-Straighten + Smart Subject Reframe
+            // 1. Smart Auto-Reframe (Horizon Straighten + Rule of Thirds for Humans & Objects — ZERO fake zoom)
             if (reframe != ReframeMode.OFF) {
-                val reframed = applyAutoReframe(current, rollDeg, isFrontCamera, reframe)
+                val reframed = applySmartReframe(current, rollDeg, isFrontCamera, reframe)
                 if (reframed !== current) {
                     current.recycle()
                     current = reframed
                 }
-                appliedTags.add(reframe.label.removePrefix("REFR:"))
+                appliedTags.add(reframe.label.removePrefix("REFR "))
             }
 
-            // Step 2: AI DSLR Portrait Bokeh
+            // 2. Subtle Natural DSLR Bokeh (Automatically skipped if no clear human subject)
             if (bokeh != BokehLevel.OFF) {
-                val blurred = applyDslrBokeh(current, bokeh)
+                val blurred = applyNaturalDslrBokeh(current, bokeh)
                 if (blurred !== current) {
                     current.recycle()
                     current = blurred
-                    appliedTags.add(bokeh.label.removePrefix("BLUR:"))
+                    appliedTags.add(bokeh.label)
                 }
             }
 
-            // Step 3: Pro Color Grading
+            // 3. Pro Color Look
             if (look != ProLook.NATURAL) {
                 val graded = applyColorLook(current, look)
                 if (graded !== current) {
@@ -207,18 +415,18 @@ class AiPhotoEngine(
                 appliedTags.add(look.label)
             }
 
-            saveBitmapToGallery(current, fileName)
-            return if (appliedTags.isEmpty()) "Saved!" else "Saved (${appliedTags.joinToString(" + ")})"
+            val uri = saveBitmapToGallery(current, fileName)
+            val label = if (appliedTags.isEmpty()) "Saved" else "Saved (${appliedTags.joinToString(" + ")})"
+            return SaveOutcome(label, uri)
         } catch (_: Throwable) {
-            // Bulletproof fallback: never lose a user's photo
-            saveFileDirectlyToGallery(sourceFile, fileName)
-            return "Saved Original (Safe Fallback)"
+            val uri = saveFileDirectlyToGallery(sourceFile, fileName)
+            return SaveOutcome("Saved Original", uri)
         } finally {
             current?.recycle()
         }
     }
 
-    private fun applyAutoReframe(
+    private fun applySmartReframe(
         src: Bitmap,
         rollDeg: Float,
         isFrontCamera: Boolean,
@@ -226,8 +434,8 @@ class AiPhotoEngine(
     ): Bitmap {
         var work = src
 
-        // 1A. Horizon Auto-Straighten (for unintentional tilts between 1.2° and 18°)
-        if (abs(rollDeg) in 1.2f..18f) {
+        // 1A. Horizon Auto-Straighten (only for gentle unintentional tilts 1.5°..15°)
+        if (abs(rollDeg) in 1.5f..15f) {
             val correctionAngle = if (isFrontCamera) rollDeg else -rollDeg
             val rad = Math.toRadians(abs(correctionAngle).toDouble())
             val c = cos(rad).toFloat()
@@ -236,12 +444,11 @@ class AiPhotoEngine(
             val m = Matrix().apply { postRotate(correctionAngle) }
             val rotated = Bitmap.createBitmap(work, 0, 0, work.width, work.height, m, true)
 
-            // Exact largest inscribed centered rectangle (zero black corners)
             val a = work.width * 0.5f
             val b = work.height * 0.5f
             val k = min(a / (a * c + b * s), b / (a * s + b * c)) * 0.99f
             val safeW = (work.width * k).toInt().coerceIn(32, rotated.width)
-            val safeH = (work.height * k).toInt().coerceIn(32, rotated.height)
+            val safeH = (work.height * k).toInt().coerceAtLeast(32).coerceAtMost(rotated.height)
             val startX = ((rotated.width - safeW) / 2).coerceAtLeast(0)
             val startY = ((rotated.height - safeH) / 2).coerceAtLeast(0)
 
@@ -250,7 +457,6 @@ class AiPhotoEngine(
             work = straightened
         }
 
-        // 1B. Smart Face-Aware Rule-of-Thirds Crop
         val targetRatio = mode.ratio
         if (targetRatio <= 0f) return work
 
@@ -258,8 +464,9 @@ class AiPhotoEngine(
         val h = work.height
         val currentRatio = w.toFloat() / h.toFloat()
 
-        var cropW: Int
-        var cropH: Int
+        // Preserve MAXIMUM field of view (no artificial zoom-in!)
+        val cropW: Int
+        val cropH: Int
         if (currentRatio > targetRatio) {
             cropH = h
             cropW = (h * targetRatio).toInt().coerceIn(32, w)
@@ -268,43 +475,51 @@ class AiPhotoEngine(
             cropH = (w / targetRatio).toInt().coerceIn(32, h)
         }
 
-        // Detect faces on straightened frame to lock composition
-        val faces = try {
+        var cropLeft = (w - cropW) / 2
+        var cropTop = (h - cropH) / 2
+
+        // Check for real human faces first
+        val rawFaces = try {
             Tasks.await(faceDetector.process(InputImage.fromBitmap(work, 0)))
         } catch (_: Exception) {
             emptyList()
         }
+        val validFaces = rawFaces.filter { f ->
+            val aspect = if (f.boundingBox.height() > 0) f.boundingBox.width().toFloat() / f.boundingBox.height() else 0f
+            aspect in 0.55f..1.65f && f.leftEyeOpenProbability != null && f.rightEyeOpenProbability != null
+        }
 
-        var cropLeft = (w - cropW) / 2
-        var cropTop = (h - cropH) / 2
-
-        if (faces.isNotEmpty()) {
+        if (validFaces.isNotEmpty()) {
             val union = RectF(
-                faces.minOf { it.boundingBox.left }.toFloat(),
-                faces.minOf { it.boundingBox.top }.toFloat(),
-                faces.maxOf { it.boundingBox.right }.toFloat(),
-                faces.maxOf { it.boundingBox.bottom }.toFloat()
+                validFaces.minOf { it.boundingBox.left }.toFloat(),
+                validFaces.minOf { it.boundingBox.top }.toFloat(),
+                validFaces.maxOf { it.boundingBox.right }.toFloat(),
+                validFaces.maxOf { it.boundingBox.bottom }.toFloat()
             )
-
-            // Slight smart punch-in (up to 14%) if face is very small in frame
-            val faceRatioW = union.width() / cropW.toFloat()
-            if (faceRatioW < 0.16f && faces.size == 1) {
-                cropW = (cropW * 0.86f).toInt().coerceAtLeast(64)
-                cropH = (cropH * 0.86f).toInt().coerceAtLeast(64)
-            }
-
-            // Center horizontally on subject; align face vertically near upper Rule-of-Thirds (34%)
+            // Center horizontally on subject; align eyes near upper Rule of Thirds (33%)
             val desiredLeft = (union.centerX() - cropW * 0.5f).toInt()
-            var desiredTop = (union.centerY() - cropH * 0.34f).toInt()
+            var desiredTop = (union.centerY() - cropH * 0.33f).toInt()
 
-            // Guarantee headroom above top of head
-            val minHeadroomTop = (union.top - union.height() * 0.50f).toInt()
-            if (desiredTop > minHeadroomTop) {
-                desiredTop = minHeadroomTop
-            }
+            // Guarantee natural headroom above top of head
+            val minHeadroomTop = (union.top - union.height() * 0.55f).toInt()
+            if (desiredTop > minHeadroomTop) desiredTop = minHeadroomTop
 
             cropLeft = desiredLeft.coerceIn(0, (w - cropW).coerceAtLeast(0))
             cropTop = desiredTop.coerceIn(0, (h - cropH).coerceAtLeast(0))
+        } else {
+            // No human face -> Smart Object-Aware Reframe
+            val objects = try {
+                Tasks.await(singleObjectDetector.process(InputImage.fromBitmap(work, 0)))
+            } catch (_: Exception) {
+                emptyList()
+            }
+            if (objects.isNotEmpty()) {
+                val objBox = objects.first().boundingBox
+                val desiredLeft = (objBox.centerX() - cropW * 0.5f).toInt()
+                val desiredTop = (objBox.centerY() - cropH * 0.48f).toInt()
+                cropLeft = desiredLeft.coerceIn(0, (w - cropW).coerceAtLeast(0))
+                cropTop = desiredTop.coerceIn(0, (h - cropH).coerceAtLeast(0))
+            }
         }
 
         val finalCrop = Bitmap.createBitmap(work, cropLeft, cropTop, cropW, cropH)
@@ -312,7 +527,7 @@ class AiPhotoEngine(
         return finalCrop
     }
 
-    private fun applyDslrBokeh(src: Bitmap, level: BokehLevel): Bitmap {
+    private fun applyNaturalDslrBokeh(src: Bitmap, level: BokehLevel): Bitmap {
         val mask = try {
             Tasks.await(segmenter.process(InputImage.fromBitmap(src, 0)))
         } catch (_: Exception) {
@@ -324,31 +539,44 @@ class AiPhotoEngine(
         val buf = mask.buffer
         buf.rewind()
 
-        val maskPixels = IntArray(mw * mh)
+        val alphaRaw = IntArray(mw * mh)
         var fgPixels = 0
         for (i in 0 until mw * mh) {
             val conf = buf.float
-            if (conf > 0.55f) fgPixels++
-            // Smoothstep feathering for natural hair & shoulder edges
-            val t = ((conf - 0.25f) / 0.53f).coerceIn(0f, 1f)
+            if (conf > 0.60f) fgPixels++
+            // Gentle smoothstep feathering so hair & shoulders blend naturally
+            val t = ((conf - 0.30f) / 0.55f).coerceIn(0f, 1f)
             val smooth = t * t * (3f - 2f * t)
-            val alpha = (smooth * 255f).toInt().coerceIn(0, 255)
-            maskPixels[i] = (alpha shl 24) or 0x00FFFFFF
+            alphaRaw[i] = (smooth * 255f).toInt().coerceIn(0, 255)
         }
 
-        // Skip blur if no clear human subject detected (protects landscape/object shots)
+        // Skip bokeh automatically on objects/landscapes where no clear person is present
         val fgRatio = fgPixels.toFloat() / (mw * mh).coerceAtLeast(1)
-        if (fgRatio < 0.03f || fgRatio > 0.96f) {
-            return src
+        if (fgRatio < 0.05f || fgRatio > 0.94f) return src
+
+        // Soft 3x3 edge-feather pass on mask to eliminate cut-out halo
+        val maskPixels = IntArray(mw * mh)
+        for (y in 0 until mh) {
+            val y0 = (y - 1).coerceAtLeast(0) * mw
+            val y1 = y * mw
+            val y2 = (y + 1).coerceAtMost(mh - 1) * mw
+            for (x in 0 until mw) {
+                val x0 = (x - 1).coerceAtLeast(0)
+                val x2 = (x + 1).coerceAtMost(mw - 1)
+                val avgA = (
+                    alphaRaw[y0 + x0] + alphaRaw[y0 + x] + alphaRaw[y0 + x2] +
+                    alphaRaw[y1 + x0] + alphaRaw[y1 + x] * 2 + alphaRaw[y1 + x2] +
+                    alphaRaw[y2 + x0] + alphaRaw[y2 + x] + alphaRaw[y2 + x2]
+                ) / 10
+                maskPixels[y1 + x] = (avgA shl 24) or 0x00FFFFFF
+            }
         }
 
         val rawMaskBitmap = Bitmap.createBitmap(mw, mh, Bitmap.Config.ARGB_8888)
         rawMaskBitmap.setPixels(maskPixels, 0, mw, 0, 0, mw, mh)
 
-        // Generate creamy blurred background via fast 3-pass separable Gaussian approx
-        val blurredBg = createSmoothBlur(src, level.downScale, level.radius)
+        val blurredBg = createSmoothBlur(src, level.downScale, level.radius, level.passes)
 
-        // Cut out feathered sharp foreground using native Skia DST_IN
         val fgLayer = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
         val fgCanvas = Canvas(fgLayer)
         fgCanvas.drawBitmap(src, 0f, 0f, null)
@@ -359,7 +587,6 @@ class AiPhotoEngine(
         fgCanvas.drawBitmap(rawMaskBitmap, null, Rect(0, 0, src.width, src.height), maskPaint)
         rawMaskBitmap.recycle()
 
-        // Composite sharp foreground onto creamy blurred background
         val outCanvas = Canvas(blurredBg)
         outCanvas.drawBitmap(fgLayer, 0f, 0f, Paint(Paint.ANTI_ALIAS_FLAG))
         fgLayer.recycle()
@@ -367,7 +594,7 @@ class AiPhotoEngine(
         return blurredBg
     }
 
-    private fun createSmoothBlur(src: Bitmap, downScale: Int, radius: Int): Bitmap {
+    private fun createSmoothBlur(src: Bitmap, downScale: Int, radius: Int, passes: Int): Bitmap {
         val sw = (src.width / downScale).coerceAtLeast(16)
         val sh = (src.height / downScale).coerceAtLeast(16)
         val small = Bitmap.createScaledBitmap(src, sw, sh, true)
@@ -376,8 +603,7 @@ class AiPhotoEngine(
         val temp = IntArray(sw * sh)
         small.getPixels(pixels, 0, sw, 0, 0, sw, sh)
 
-        // 3 passes of separable box blur = smooth Gaussian bokeh
-        repeat(3) {
+        repeat(passes) {
             boxBlurH(pixels, temp, sw, sh, radius)
             boxBlurV(temp, pixels, sw, sh, radius)
         }
@@ -394,9 +620,7 @@ class AiPhotoEngine(
         val div = 2 * r + 1
         for (y in 0 until h) {
             val row = y * w
-            var rSum = 0
-            var gSum = 0
-            var bSum = 0
+            var rSum = 0; var gSum = 0; var bSum = 0
             for (i in -r..r) {
                 val px = src[row + i.coerceIn(0, w - 1)]
                 rSum += (px shr 16) and 0xFF
@@ -417,9 +641,7 @@ class AiPhotoEngine(
     private fun boxBlurV(src: IntArray, dst: IntArray, w: Int, h: Int, r: Int) {
         val div = 2 * r + 1
         for (x in 0 until w) {
-            var rSum = 0
-            var gSum = 0
-            var bSum = 0
+            var rSum = 0; var gSum = 0; var bSum = 0
             for (i in -r..r) {
                 val px = src[i.coerceIn(0, h - 1) * w + x]
                 rSum += (px shr 16) and 0xFF
@@ -442,55 +664,39 @@ class AiPhotoEngine(
         when (look) {
             ProLook.NOIR_BW -> {
                 cm.setSaturation(0f)
-                cm.postConcat(
-                    ColorMatrix(
-                        floatArrayOf(
-                            1.22f, 0f, 0f, 0f, -22f,
-                            0f, 1.22f, 0f, 0f, -22f,
-                            0f, 0f, 1.22f, 0f, -22f,
-                            0f, 0f, 0f, 1f, 0f
-                        )
-                    )
-                )
+                cm.postConcat(ColorMatrix(floatArrayOf(
+                    1.20f, 0f, 0f, 0f, -20f,
+                    0f, 1.20f, 0f, 0f, -20f,
+                    0f, 0f, 1.20f, 0f, -20f,
+                    0f, 0f, 0f, 1f, 0f
+                )))
             }
             ProLook.CINEMATIC -> {
-                cm.setSaturation(0.92f)
-                cm.postConcat(
-                    ColorMatrix(
-                        floatArrayOf(
-                            1.10f, 0f, 0f, 0f, -6f,
-                            0f, 1.04f, 0f, 0f, -4f,
-                            0f, 0f, 1.08f, 0f, 4f,
-                            0f, 0f, 0f, 1f, 0f
-                        )
-                    )
-                )
+                cm.setSaturation(0.94f)
+                cm.postConcat(ColorMatrix(floatArrayOf(
+                    1.08f, 0f, 0f, 0f, -5f,
+                    0f, 1.03f, 0f, 0f, -3f,
+                    0f, 0f, 1.07f, 0f, 3f,
+                    0f, 0f, 0f, 1f, 0f
+                )))
             }
             ProLook.WARM_GOLD -> {
-                cm.setSaturation(1.12f)
-                cm.postConcat(
-                    ColorMatrix(
-                        floatArrayOf(
-                            1.10f, 0f, 0f, 0f, 8f,
-                            0f, 1.03f, 0f, 0f, 3f,
-                            0f, 0f, 0.90f, 0f, -6f,
-                            0f, 0f, 0f, 1f, 0f
-                        )
-                    )
-                )
+                cm.setSaturation(1.10f)
+                cm.postConcat(ColorMatrix(floatArrayOf(
+                    1.08f, 0f, 0f, 0f, 6f,
+                    0f, 1.02f, 0f, 0f, 2f,
+                    0f, 0f, 0.92f, 0f, -5f,
+                    0f, 0f, 0f, 1f, 0f
+                )))
             }
             ProLook.VIVID -> {
-                cm.setSaturation(1.30f)
-                cm.postConcat(
-                    ColorMatrix(
-                        floatArrayOf(
-                            1.08f, 0f, 0f, 0f, -8f,
-                            0f, 1.08f, 0f, 0f, -8f,
-                            0f, 0f, 1.08f, 0f, -8f,
-                            0f, 0f, 0f, 1f, 0f
-                        )
-                    )
-                )
+                cm.setSaturation(1.24f)
+                cm.postConcat(ColorMatrix(floatArrayOf(
+                    1.06f, 0f, 0f, 0f, -6f,
+                    0f, 1.06f, 0f, 0f, -6f,
+                    0f, 0f, 1.06f, 0f, -6f,
+                    0f, 0f, 0f, 1f, 0f
+                )))
             }
             ProLook.NATURAL -> return src
         }
@@ -505,8 +711,8 @@ class AiPhotoEngine(
     }
 
     private fun computeSharpnessScore(bmp: Bitmap, roi: Rect): Double {
-        val rw = (roi.width()).coerceAtLeast(3)
-        val rh = (roi.height()).coerceAtLeast(3)
+        val rw = roi.width().coerceAtLeast(3)
+        val rh = roi.height().coerceAtLeast(3)
         val pixels = IntArray(rw * rh)
         bmp.getPixels(pixels, 0, rw, roi.left, roi.top, rw, rh)
 
@@ -567,7 +773,7 @@ class AiPhotoEngine(
         return rotated
     }
 
-    private fun saveBitmapToGallery(bmp: Bitmap, fileName: String) {
+    private fun saveBitmapToGallery(bmp: Bitmap, fileName: String): Uri? {
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
             put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
@@ -581,9 +787,28 @@ class AiPhotoEngine(
                 bmp.compress(Bitmap.CompressFormat.JPEG, 94, out)
             }
         }
+        return uri
     }
 
-    private fun saveFileDirectlyToGallery(file: File, fileName: String) {
+    private fun saveRawImageBytesToGallery(bytes: ByteArray, mimeType: String, fileName: String): Uri? {
+        val safeMime = if (mimeType.startsWith("image/")) mimeType else "image/jpeg"
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+            put(MediaStore.MediaColumns.MIME_TYPE, safeMime)
+            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
+                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/AICam-Pro")
+            }
+        }
+        val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+        if (uri != null) {
+            context.contentResolver.openOutputStream(uri)?.use { out ->
+                out.write(bytes)
+            }
+        }
+        return uri
+    }
+
+    private fun saveFileDirectlyToGallery(file: File, fileName: String): Uri? {
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
             put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
@@ -597,5 +822,6 @@ class AiPhotoEngine(
                 FileInputStream(file).use { input -> input.copyTo(out) }
             }
         }
+        return uri
     }
 }
