@@ -11,8 +11,8 @@ android {
         applicationId = "com.aicam.pro"
         minSdk = 24
         targetSdk = 34
-        versionCode = 4
-        versionName = "4.0"
+        versionCode = 5
+        versionName = "5.0"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
@@ -60,5 +60,6 @@ dependencies {
     implementation("androidx.camera:camera-video:$cameraxVersion")
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("com.google.mlkit:face-detection:16.1.7")
+    implementation("com.google.mlkit:object-detection:17.0.2")
     implementation("com.google.mlkit:segmentation-selfie:16.0.0-beta6")
 }
