@@ -180,26 +180,19 @@ Avoid: waxy skin, plastic skin, airbrushed skin, beauty filter, dead eyes, HDR h
 
     // ==================== 2. FULL AUTONOMOUS PHOTOGRAPHER PIPELINE ====================
 
-    /**
-     * Zero-Manual Complete Photographer Pipeline:
-     * 1. Auto-Straighten Horizon
-     * 2. Autonomous Subject Blueprint (Portrait / Selfie / Group / Object / Scene)
-     * 3. Intelligent Framing & Clutter Removal (4:5 or 3:4 automatically)
-     * 4. Real Adaptive Computational Lighting (AWB + Histogram HDR + Shadow Fill + Skin-Safe Vibrance + Micro-Sharpen + 24mm Vignette)
-     * 5. Selective Subtle DSLR Depth (only on Solo Portrait/Selfie, never ruins Groups/Objects/Landscapes)
-     */
     fun processAutopilotAndSave(
         sourceFile: File,
         fileName: String,
         rollDeg: Float,
         isFrontCamera: Boolean
     ): AutopilotResult {
-        var current: Bitmap? = null
+        var toRecycle: Bitmap? = null
         val tags = mutableListOf<String>()
 
         try {
-            current = decodeOrientedBitmap(sourceFile, maxDim = 1800)
+            var current: Bitmap = decodeOrientedBitmap(sourceFile, maxDim = 1800)
                 ?: throw IllegalStateException("Decode failed")
+            toRecycle = current
 
             // Step 1: Horizon Auto-Straighten (for gentle tilts 1.2°..15°)
             if (abs(rollDeg) in 1.2f..15f) {
@@ -207,6 +200,7 @@ Avoid: waxy skin, plastic skin, airbrushed skin, beauty filter, dead eyes, HDR h
                 if (straight !== current) {
                     current.recycle()
                     current = straight
+                    toRecycle = current
                     tags.add("Level")
                 }
             }
@@ -222,22 +216,25 @@ Avoid: waxy skin, plastic skin, airbrushed skin, beauty filter, dead eyes, HDR h
                 else -> ShotBlueprint.LANDSCAPE_SCENE
             }
 
-            // Step 3: Autonomous Framing ("Kya frame me lena hai, kya hatana hai")
+            // Step 3: Autonomous Framing
             val reframed = applyAutonomousReframe(current, blueprint, faces, heroObj)
             if (reframed !== current) {
                 current.recycle()
                 current = reframed
+                toRecycle = current
                 tags.add(if (blueprint == ShotBlueprint.GROUP_SHOT || blueprint == ShotBlueprint.LANDSCAPE_SCENE) "3:4" else "4:5")
             }
 
-            // Re-detect primary subject box on the final cropped frame for pinpoint lighting
+            // Re-detect primary subject box on final cropped frame
             val finalFaces = if (faces.isNotEmpty()) detectValidFaces(current) else emptyList()
+            val curW = current.width
+            val curH = current.height
             val subjectRect = when {
                 finalFaces.isNotEmpty() -> {
                     val b = finalFaces.maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }!!.boundingBox
-                    clampRect(b, current.width, current.height)
+                    clampRect(b, curW, curH)
                 }
-                heroObj != null -> detectHeroObject(current)?.let { clampRect(it, current.width, current.height) }
+                heroObj != null -> detectHeroObject(current)?.let { clampRect(it, curW, curH) }
                 else -> null
             }
 
@@ -246,6 +243,7 @@ Avoid: waxy skin, plastic skin, airbrushed skin, beauty filter, dead eyes, HDR h
             if (lit !== current) {
                 current.recycle()
                 current = lit
+                toRecycle = current
             }
             tags.add("Pro HDR")
 
@@ -255,6 +253,7 @@ Avoid: waxy skin, plastic skin, airbrushed skin, beauty filter, dead eyes, HDR h
                 if (depth !== current) {
                     current.recycle()
                     current = depth
+                    toRecycle = current
                     tags.add("f/2.8")
                 }
             } else if (blueprint == ShotBlueprint.SELFIE_PRO) {
@@ -262,6 +261,7 @@ Avoid: waxy skin, plastic skin, airbrushed skin, beauty filter, dead eyes, HDR h
                 if (depth !== current) {
                     current.recycle()
                     current = depth
+                    toRecycle = current
                     tags.add("f/4.0")
                 }
             }
@@ -276,7 +276,7 @@ Avoid: waxy skin, plastic skin, airbrushed skin, beauty filter, dead eyes, HDR h
             val uri = saveFileDirectlyToGallery(sourceFile, fileName)
             return AutopilotResult("Saved Original HD", ShotBlueprint.LANDSCAPE_SCENE, uri)
         } finally {
-            current?.recycle()
+            toRecycle?.recycle()
         }
     }
 
@@ -341,7 +341,6 @@ Avoid: waxy skin, plastic skin, airbrushed skin, beauty filter, dead eyes, HDR h
             ShotBlueprint.SOLO_PORTRAIT, ShotBlueprint.SELFIE_PRO -> {
                 if (faces.isNotEmpty()) {
                     val fBox = faces.maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }!!.boundingBox
-                    // Gentle smart clutter trim (max 16%) ONLY if person is tiny in a wide room
                     val faceWidthRatio = fBox.width().toFloat() / cropW.toFloat()
                     if (faceWidthRatio < 0.19f && blueprint == ShotBlueprint.SOLO_PORTRAIT) {
                         cropW = (cropW * 0.85f).toInt().coerceAtLeast(128)
@@ -379,7 +378,6 @@ Avoid: waxy skin, plastic skin, airbrushed skin, beauty filter, dead eyes, HDR h
 
             ShotBlueprint.OBJECT_HERO -> {
                 if (heroObj != null) {
-                    // Trim cluttered edges around small product/object (up to 18%)
                     val objWFrac = heroObj.width().toFloat() / cropW.toFloat()
                     val objHFrac = heroObj.height().toFloat() / cropH.toFloat()
                     if (objWFrac < 0.38f && objHFrac < 0.38f) {
@@ -394,7 +392,6 @@ Avoid: waxy skin, plastic skin, airbrushed skin, beauty filter, dead eyes, HDR h
             }
 
             ShotBlueprint.LANDSCAPE_SCENE -> {
-                // Edge-energy visual saliency center so main scenery stays perfectly composed
                 val salCenter = findVisualSaliencyCenter(src)
                 val desiredLeft = (salCenter.first * w - cropW * 0.5f).toInt()
                 val desiredTop = (salCenter.second * h - cropH * 0.5f).toInt()
@@ -453,7 +450,6 @@ Avoid: waxy skin, plastic skin, airbrushed skin, beauty filter, dead eyes, HDR h
         val pixels = IntArray(total)
         src.getPixels(pixels, 0, w, 0, 0, w, h)
 
-        // 4A. Histogram + Global & Subject Metering
         val hist = IntArray(256)
         var sumR = 0.0; var sumG = 0.0; var sumB = 0.0
         var sampleCount = 0
@@ -508,7 +504,6 @@ Avoid: waxy skin, plastic skin, airbrushed skin, beauty filter, dead eyes, HDR h
             blueprint == ShotBlueprint.GROUP_SHOT
         val isBacklit = subjMean < 108f && p98 > 232
 
-        // 4B. Gentle Auto White Balance (neutralizes yellow/green indoor cast, preserves warmth)
         val avgR = (sumR / sampleCount).toFloat().coerceAtLeast(1f)
         val avgG = (sumG / sampleCount).toFloat().coerceAtLeast(1f)
         val avgB = (sumB / sampleCount).toFloat().coerceAtLeast(1f)
@@ -518,13 +513,11 @@ Avoid: waxy skin, plastic skin, airbrushed skin, beauty filter, dead eyes, HDR h
         val gainG = (1f + (avgGray / avgG - 1f) * 0.30f).coerceIn(0.93f, 1.08f)
         var gainB = (1f + (avgGray / avgB - 1f) * 0.30f).coerceIn(0.91f, 1.11f)
 
-        // Keep portraits gently warm & natural (prevents cold/greyish skin)
         if (isHuman) {
             gainR *= 1.02f
             gainB *= 0.985f
         }
 
-        // 4C. Adaptive Filmic HDR Tone Curve (256-entry LUT)
         val targetMid = if (isHuman) 136f else 124f
         val refLuma = (if (isHuman) subjMean * 0.72f + p50 * 0.28f else p50.toFloat()).coerceIn(32f, 225f)
         val gamma = when {
@@ -542,19 +535,15 @@ Avoid: waxy skin, plastic skin, airbrushed skin, beauty filter, dead eyes, HDR h
         for (i in 0..255) {
             var t = ((i / 255f - blackClip) / span).coerceIn(0f, 1f)
             t = t.pow(gamma)
-            // Backlit & shadow fill without crushing pure blacks or clipping white
             t = (t + (1f - t) * (1f - t) * t * shadowLift).coerceIn(0f, 1f)
-            // Filmic S-curve micro-contrast
             val s = t * t * (3f - 2f * t)
             t = t * (1f - sCurveBlend) + s * sCurveBlend
-            // Soft highlight roll-off above 86%
             if (t > 0.86f) {
                 t = 0.86f + (t - 0.86f) * 0.88f
             }
             toneLut[i] = (t * 255f + 0.5f).toInt().coerceIn(0, 255)
         }
 
-        // 4D. Single-Pass AWB + Hybrid HDR Tone + Skin-Safe Vibrance + Subtle 24mm Micro-Vignette
         val invHalfW = 2f / w.toFloat()
         val invHalfH = 2f / h.toFloat()
         val vigStrength = if (blueprint == ShotBlueprint.LANDSCAPE_SCENE) 0.07f else 0.11f
@@ -574,12 +563,10 @@ Avoid: waxy skin, plastic skin, airbrushed skin, beauty filter, dead eyes, HDR h
                 val lum1 = toneLut[lum0]
                 val ratio = ((lum1 + 2f) / (lum0 + 2f)).coerceIn(0.60f, 2.05f)
 
-                // Hybrid 65% luminance-preserving + 35% per-channel filmic curve
                 var r = (r0 * ratio * 0.65f + toneLut[r0] * 0.35f)
                 var g = (g0 * ratio * 0.65f + toneLut[g0] * 0.35f)
                 var b = (b0 * ratio * 0.65f + toneLut[b0] * 0.35f)
 
-                // Skin-Safe Vibrance (protects wheatish/warm skin tones from turning orange)
                 val avgC = (r + g + b) / 3f
                 val isSkin = r > g && g > b && (r - b) > 14f && (r - g) < 85f
                 val satMult = if (isSkin) 1.03f else 1.15f
@@ -587,7 +574,6 @@ Avoid: waxy skin, plastic skin, airbrushed skin, beauty filter, dead eyes, HDR h
                 g = avgC + (g - avgC) * satMult
                 b = avgC + (b - avgC) * satMult
 
-                // Subtle 24mm optical micro-vignette
                 val nx = px * invHalfW - 1f
                 val d2 = (nx * nx + ny2) * 0.5f
                 val vig = 1f - vigStrength * d2
@@ -599,7 +585,6 @@ Avoid: waxy skin, plastic skin, airbrushed skin, beauty filter, dead eyes, HDR h
             }
         }
 
-        // 4E. Noise-Gated Optical Micro-Sharpening (crisp lashes, hair & product edges, zero halo)
         val sharpStrength = if (blueprint == ShotBlueprint.OBJECT_HERO || blueprint == ShotBlueprint.LANDSCAPE_SCENE) 0.42f else 0.30f
         applyNoiseGatedSharpen(pixels, w, h, sharpStrength)
 
@@ -626,7 +611,6 @@ Avoid: waxy skin, plastic skin, airbrushed skin, beauty filter, dead eyes, HDR h
                     luma[next + x - 1] + luma[next + x] + luma[next + x + 1]
                 ) / 9
                 val diff = luma[idx] - blur
-                // Threshold of 6 prevents amplifying flat skin or shadow sensor noise
                 if (abs(diff) > 6) {
                     val delta = (diff * amount).toInt().coerceIn(-18, 18)
                     val p = pixels[idx]
