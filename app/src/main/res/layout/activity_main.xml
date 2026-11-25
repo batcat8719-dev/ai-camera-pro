@@ -14,7 +14,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- TOP ULTRA-CLEAN GEN-Z GLASS HUD -->
+    <!-- TOP FLOATING FLAGSHIP GLASS HUD -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -42,7 +42,7 @@
                 android:fontFamily="sans-serif-medium"
                 android:letterSpacing="0.04"
                 android:maxLines="1"
-                android:text="✦ AUTOPILOT V6"
+                android:text="✦ FLAGSHIP V7"
                 android:textColor="#CCFF00"
                 android:textSize="11sp" />
 
@@ -120,7 +120,7 @@
             android:paddingTop="6dp"
             android:paddingEnd="14dp"
             android:paddingBottom="6dp"
-            android:text="✦ AUTOPILOT FINISHING..."
+            android:text="✦ SMART HDR 5 FUSING..."
             android:textColor="#09090B"
             android:textSize="11sp"
             android:visibility="gone" />
@@ -137,24 +137,24 @@
             android:paddingTop="6dp"
             android:paddingEnd="14dp"
             android:paddingBottom="6dp"
-            android:text="✦ Autopilot Active — Point &amp; Shoot"
+            android:text="✦ Flagship V7 Autopilot Active"
             android:textColor="#F4F4F5"
             android:textSize="12sp" />
     </LinearLayout>
 
-    <!-- BOTTOM ZERO-CLUTTER GEN-Z DECK -->
+    <!-- BOTTOM GEN-Z FLAGSHIP DECK -->
     <LinearLayout
         android:id="@+id/bottomDeck"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
         android:orientation="vertical"
-        android:paddingStart="14dp"
-        android:paddingTop="12dp"
-        android:paddingEnd="14dp"
-        android:paddingBottom="26dp">
+        android:paddingStart="12dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="24dp">
 
-        <!-- Optional Manual DSLR Drawer (Hidden in Autopilot) -->
+        <!-- iPhone 18 Pro Max / S26 Ultra Pro Controls Drawer -->
         <LinearLayout
             android:id="@+id/manualPanel"
             android:layout_width="match_parent"
@@ -164,14 +164,36 @@
             android:padding="12dp"
             android:visibility="gone">
 
-            <TextView
-                android:id="@+id/tvIso"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:fontFamily="sans-serif-medium"
-                android:text="ISO AUTO"
-                android:textColor="#CCFF00"
-                android:textSize="11sp" />
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/tvIso"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:fontFamily="sans-serif-medium"
+                    android:text="ISO AUTO"
+                    android:textColor="#CCFF00"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/btnWb"
+                    android:layout_width="wrap_content"
+                    android:layout_height="26dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:text="WB: AUTO"
+                    android:textColor="#38BDF8"
+                    android:textSize="10sp" />
+            </LinearLayout>
 
             <SeekBar
                 android:id="@+id/seekIso"
@@ -184,7 +206,7 @@
                 android:id="@+id/tvShutter"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
+                android:layout_marginTop="2dp"
                 android:fontFamily="sans-serif-medium"
                 android:text="SHUTTER AUTO"
                 android:textColor="#CCFF00"
@@ -196,14 +218,31 @@
                 android:layout_height="wrap_content"
                 android:max="10"
                 android:progress="5" />
+
+            <TextView
+                android:id="@+id/tvFocus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:fontFamily="sans-serif-medium"
+                android:text="FOCUS: AUTO"
+                android:textColor="#FFD166"
+                android:textSize="11sp" />
+
+            <SeekBar
+                android:id="@+id/seekFocus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="100"
+                android:progress="0" />
         </LinearLayout>
 
-        <!-- Minimal Zoom Pills -->
+        <!-- Quick Focal Length Pills -->
         <LinearLayout
             android:id="@+id/zoomRow"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="10dp"
+            android:layout_marginBottom="8dp"
             android:gravity="center"
             android:orientation="horizontal">
 
@@ -264,81 +303,147 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:fontFamily="sans-serif-medium"
-                android:text="1.0x"
+                android:text="24mm"
                 android:textColor="#A1A1AA"
                 android:textSize="11sp" />
         </LinearLayout>
 
-        <!-- Ultra-Minimal Assist Strip (Only 4 clean pills — everything else is 100% Automatic!) -->
-        <LinearLayout
-            android:id="@+id/quickPillRow"
+        <!-- Flagship Quick Pill Strip (100% Automatic by default, customizable in 1 tap) -->
+        <HorizontalScrollView
+            android:id="@+id/chipScroll"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
-            android:gravity="center"
-            android:orientation="horizontal">
+            android:layout_marginBottom="10dp"
+            android:clipToPadding="false"
+            android:overScrollMode="never"
+            android:scrollbars="none">
 
-            <TextView
-                android:id="@+id/btnAutoClick"
+            <LinearLayout
                 android:layout_width="wrap_content"
-                android:layout_height="30dp"
-                android:layout_marginEnd="8dp"
-                android:clickable="true"
-                android:focusable="true"
-                android:fontFamily="sans-serif-medium"
-                android:gravity="center"
-                android:paddingStart="11dp"
-                android:paddingEnd="11dp"
-                android:text="HANDS-FREE"
-                android:textSize="10sp" />
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="2dp"
+                android:paddingEnd="8dp">
 
-            <TextView
-                android:id="@+id/btnVoice"
-                android:layout_width="wrap_content"
-                android:layout_height="30dp"
-                android:layout_marginEnd="8dp"
-                android:clickable="true"
-                android:focusable="true"
-                android:fontFamily="sans-serif-medium"
-                android:gravity="center"
-                android:paddingStart="11dp"
-                android:paddingEnd="11dp"
-                android:text="VOICE"
-                android:textSize="10sp" />
+                <TextView
+                    android:id="@+id/btnStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:layout_marginEnd="7dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="TRUE PRO"
+                    android:textSize="10sp" />
 
-            <TextView
-                android:id="@+id/btnAiStudio"
-                android:layout_width="wrap_content"
-                android:layout_height="30dp"
-                android:layout_marginEnd="8dp"
-                android:clickable="true"
-                android:focusable="true"
-                android:fontFamily="sans-serif-medium"
-                android:gravity="center"
-                android:paddingStart="11dp"
-                android:paddingEnd="11dp"
-                android:text="✦ API"
-                android:textSize="10sp" />
+                <TextView
+                    android:id="@+id/btnAperture"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:layout_marginEnd="7dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="f/AUTO"
+                    android:textSize="10sp" />
 
-            <TextView
-                android:id="@+id/btnDirector"
-                android:layout_width="wrap_content"
-                android:layout_height="30dp"
-                android:clickable="true"
-                android:focusable="true"
-                android:fontFamily="sans-serif-medium"
-                android:gravity="center"
-                android:paddingStart="11dp"
-                android:paddingEnd="11dp"
-                android:text="✦ TIP"
-                android:textSize="10sp" />
-        </LinearLayout>
+                <TextView
+                    android:id="@+id/btnHdrNight"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:layout_marginEnd="7dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="HDR5/NIGHT"
+                    android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/btnHist"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:layout_marginEnd="7dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="HIST"
+                    android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/btnAutoClick"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:layout_marginEnd="7dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="HANDS-FREE"
+                    android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/btnVoice"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:layout_marginEnd="7dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="VOICE"
+                    android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/btnAiStudio"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:layout_marginEnd="7dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="✦ API"
+                    android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/btnDirector"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="✦ TIP"
+                    android:textSize="10sp" />
+            </LinearLayout>
+        </HorizontalScrollView>
 
         <!-- Clean Mode Switcher -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="14dp"
+            android:layout_marginBottom="12dp"
             android:gravity="center"
             android:orientation="horizontal">
 
@@ -383,7 +488,7 @@
                 android:letterSpacing="0.06"
                 android:paddingStart="14dp"
                 android:paddingEnd="14dp"
-                android:text="MANUAL"
+                android:text="PRO"
                 android:textSize="11sp" />
         </LinearLayout>
 
