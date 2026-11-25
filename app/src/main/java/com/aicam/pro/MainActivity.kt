@@ -24,6 +24,8 @@ import android.hardware.camera2.CaptureRequest
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.speech.tts.TextToSpeech
 import android.util.Base64
@@ -34,6 +36,7 @@ import android.view.ScaleGestureDetector
 import android.view.View
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.SeekBar
@@ -95,10 +98,19 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private enum class CamMode { AUTOPILOT, MANUAL }
 
+    private enum class WbPreset(val label: String, val mode: Int) {
+        AUTO("WB: AUTO", CameraMetadata.CONTROL_AWB_MODE_AUTO),
+        DAYLIGHT("WB: 5500K", CameraMetadata.CONTROL_AWB_MODE_DAYLIGHT),
+        CLOUDY("WB: 6500K", CameraMetadata.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT),
+        SHADE("WB: 7500K", CameraMetadata.CONTROL_AWB_MODE_SHADE),
+        WARM("WB: 3200K", CameraMetadata.CONTROL_AWB_MODE_INCANDESCENT)
+    }
+
     private data class SceneMetrics(
         val avgLuma: Int,
         val centerLuma: Int,
-        val highlightRatio: Float
+        val highlightRatio: Float,
+        val histBins: IntArray
     )
 
     private lateinit var previewView: PreviewView
@@ -110,17 +122,24 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var tvCoach: TextView
     private lateinit var tvIso: TextView
     private lateinit var tvShutter: TextView
+    private lateinit var tvFocus: TextView
     private lateinit var tvZoom: TextView
     private lateinit var bottomDeck: LinearLayout
     private lateinit var manualPanel: LinearLayout
-    private lateinit var quickPillRow: LinearLayout
+    private lateinit var chipScroll: HorizontalScrollView
     private lateinit var seekIso: SeekBar
     private lateinit var seekShutter: SeekBar
+    private lateinit var seekFocus: SeekBar
 
     private lateinit var btnFlash: TextView
     private lateinit var btnGemini: TextView
     private lateinit var btnSpecs: TextView
     private lateinit var btnFlip: TextView
+    private lateinit var btnWb: TextView
+    private lateinit var btnStyle: TextView
+    private lateinit var btnAperture: TextView
+    private lateinit var btnHdrNight: TextView
+    private lateinit var btnHist: TextView
     private lateinit var btnAutoClick: TextView
     private lateinit var btnVoice: TextView
     private lateinit var btnAiStudio: TextView
@@ -144,8 +163,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private var lensFacing = CameraSelector.LENS_FACING_BACK
     private var currentMode = CamMode.AUTOPILOT
+    private var currentStyle = PhotoStyle.TRUE_PRO
+    private var currentAperture = ApertureSetting.AUTO
+    private var currentWb = WbPreset.AUTO
     private var isVideoMode = false
     private var isRecording = false
+    private var isFusionEnabled = true
+    private var isHistogramEnabled = true
     private var isAutoClickEnabled = true
     private var isVoiceEnabled = true
     private var isAiStudioApiEnabled = false
@@ -154,6 +178,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private var isoRange: Range<Int>? = null
     private var exposureRange: Range<Long>? = null
+    private var minFocusDistance: Float = 0f
     private var activeShutterSteps: List<Pair<String, Long>> = emptyList()
     private var hasOis = false
     private var hasEis = false
@@ -163,6 +188,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var hardwareReport: String = "Scanning..."
     private var lastSavedUri: Uri? = null
 
+    private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var analysisExecutor: ExecutorService
     private lateinit var ioExecutor: ExecutorService
     private lateinit var apiExecutor: ExecutorService
@@ -179,6 +205,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     @Volatile private var shakeIntensity = 0f
     @Volatile private var tripodSteadyTicks = 0
     @Volatile private var latestAvgLuma = 128
+    @Volatile private var latestHighlightRatio = 0f
+    @Volatile private var latestHasHuman = false
     private var lastAx = 0f
     private var lastAy = 0f
     private var lastAz = 0f
@@ -242,7 +270,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val faceOptions = FaceDetectorOptions.Builder()
             .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
             .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
-            .setMinFaceSize(0.12f)
+            .setMinFaceSize(0.11f)
             .enableTracking()
             .build()
         faceDetector = FaceDetection.getClient(faceOptions)
@@ -296,16 +324,23 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         tvCoach = findViewById(R.id.tvCoach)
         tvIso = findViewById(R.id.tvIso)
         tvShutter = findViewById(R.id.tvShutter)
+        tvFocus = findViewById(R.id.tvFocus)
         tvZoom = findViewById(R.id.tvZoom)
         bottomDeck = findViewById(R.id.bottomDeck)
         manualPanel = findViewById(R.id.manualPanel)
-        quickPillRow = findViewById(R.id.quickPillRow)
+        chipScroll = findViewById(R.id.chipScroll)
         seekIso = findViewById(R.id.seekIso)
         seekShutter = findViewById(R.id.seekShutter)
+        seekFocus = findViewById(R.id.seekFocus)
         btnFlash = findViewById(R.id.btnFlash)
         btnGemini = findViewById(R.id.btnGemini)
         btnSpecs = findViewById(R.id.btnSpecs)
         btnFlip = findViewById(R.id.btnFlip)
+        btnWb = findViewById(R.id.btnWb)
+        btnStyle = findViewById(R.id.btnStyle)
+        btnAperture = findViewById(R.id.btnAperture)
+        btnHdrNight = findViewById(R.id.btnHdrNight)
+        btnHist = findViewById(R.id.btnHist)
         btnAutoClick = findViewById(R.id.btnAutoClick)
         btnVoice = findViewById(R.id.btnVoice)
         btnAiStudio = findViewById(R.id.btnAiStudio)
@@ -323,7 +358,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         vCaptureInner = findViewById(R.id.vCaptureInner)
     }
 
-    // ==================== GEN-Z MINIMAL UI ENGINE ====================
+    // ==================== GEN-Z FLAGSHIP UI ENGINE ====================
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
@@ -354,6 +389,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         btnFlash.background = makePill("#22FFFFFF", "#1FFFFFFF", 15, 1)
         btnGemini.background = makePill("#26CCFF00", "#55CCFF00", 15, 1)
         btnSpecs.background = makePill("#18FFFFFF", "#18FFFFFF", 15, 1)
+        btnWb.background = makePill("#2238BDF8", "#4438BDF8", 13, 1)
         btnFlip.background = makePill("#B316161C", "#33FFFFFF", 25, 1)
         btnGalleryWrap.background = makePill("#B316161C", "#44FFFFFF", 14, 1)
         ivGalleryThumb.clipToOutline = true
@@ -405,12 +441,19 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private fun updateUIState() {
+        val showPhotoChips = !isVideoMode
         manualPanel.visibility = if (currentMode == CamMode.MANUAL && !isVideoMode) View.VISIBLE else View.GONE
-        quickPillRow.visibility = if (currentMode == CamMode.MANUAL) View.GONE else View.VISIBLE
+        chipScroll.visibility = if (currentMode == CamMode.MANUAL) View.GONE else View.VISIBLE
         tvCoach.visibility = if (currentMode == CamMode.MANUAL) View.GONE else View.VISIBLE
 
-        btnAutoClick.visibility = if (isVideoMode) View.GONE else View.VISIBLE
-        btnAiStudio.visibility = if (isVideoMode) View.GONE else View.VISIBLE
+        btnStyle.visibility = if (showPhotoChips) View.VISIBLE else View.GONE
+        btnAperture.visibility = if (showPhotoChips) View.VISIBLE else View.GONE
+        btnHdrNight.visibility = if (showPhotoChips) View.VISIBLE else View.GONE
+        btnAutoClick.visibility = if (showPhotoChips) View.VISIBLE else View.GONE
+        btnAiStudio.visibility = if (showPhotoChips) View.VISIBLE else View.GONE
+
+        tvFocus.visibility = if (minFocusDistance > 0f) View.VISIBLE else View.GONE
+        seekFocus.visibility = if (minFocusDistance > 0f) View.VISIBLE else View.GONE
 
         if (isVideoMode) {
             btnFlash.text = if (torchEnabled) "⚡ON" else "⚡OFF"
@@ -422,11 +465,24 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             }
         }
 
+        btnStyle.text = currentStyle.label
+        styleChip(btnStyle, true, if (currentStyle == PhotoStyle.S26_VIVID) "#38BDF8" else "#CCFF00", "#09090B")
+
+        btnAperture.text = currentAperture.label
+        styleChip(btnAperture, currentAperture != ApertureSetting.AUTO, "#C084FC", "#09090B")
+
+        btnHdrNight.text = if (isFusionEnabled) "HDR5/NIGHT" else "BURST ONLY"
+        styleChip(btnHdrNight, isFusionEnabled, "#27272A", "#CCFF00")
+
+        styleChip(btnHist, isHistogramEnabled, "#27272A", "#CCFF00")
         styleChip(btnAutoClick, isAutoClickEnabled, "#27272A", "#CCFF00")
         styleChip(btnVoice, isVoiceEnabled, "#27272A", "#CCFF00")
-        styleChip(btnAiStudio, isAiStudioApiEnabled, "#CCFF00", "#09090B")
+
         btnAiStudio.text = if (isAiStudioApiEnabled) "✦ API ON" else "✦ API"
+        styleChip(btnAiStudio, isAiStudioApiEnabled, "#CCFF00", "#09090B")
         styleChip(btnDirector, false)
+
+        btnWb.text = currentWb.label
 
         styleChip(tabAutopilot, !isVideoMode && currentMode == CamMode.AUTOPILOT, "#CCFF00", "#09090B")
         styleChip(tabVideo, isVideoMode, "#FF2E4D", "#FFFFFF")
@@ -434,7 +490,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         tvAiStatus.visibility = if (pendingApiJobs > 0 || isCapturingPhoto) View.VISIBLE else View.GONE
         if (isCapturingPhoto) {
-            tvAiStatus.text = "✦ AUTOPILOT PROCESSING PHOTO..."
+            tvAiStatus.text = "✦ FLAGSHIP ENGINE PROCESSING..."
         } else if (pendingApiJobs > 0) {
             tvAiStatus.text = "✦ API STUDIO ($pendingApiJobs)..."
         }
@@ -453,12 +509,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 .show()
         }
 
-        // 1-Tap Send Last Photo + Strict Photorealism Prompt to Gemini Pro App (₹0!)
         btnGemini.setOnClickListener { sendLastPhotoToGeminiProApp() }
-        btnGemini.setOnLongClickListener {
-            showApiSettingsDialog()
-            true
-        }
+        btnGemini.setOnLongClickListener { showApiSettingsDialog(); true }
 
         btnFlip.setOnClickListener {
             if (isRecording || isCapturingPhoto) return@setOnClickListener
@@ -507,7 +559,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             val needRestart = isVideoMode
             isVideoMode = false
             currentMode = CamMode.MANUAL
-            overlayView.updateOverlay(emptyList(), 0, 0f, false, false)
             updateUIState()
             if (needRestart) startCamera() else applyManualOrAutoControl()
         }
@@ -527,17 +578,48 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             updateUIState()
         }
 
+        btnStyle.setOnClickListener {
+            val all = PhotoStyle.values()
+            currentStyle = all[(currentStyle.ordinal + 1) % all.size]
+            updateUIState()
+            Toast.makeText(this, "Style: ${currentStyle.label}", Toast.LENGTH_SHORT).show()
+        }
+
+        btnAperture.setOnClickListener {
+            val all = ApertureSetting.values()
+            currentAperture = all[(currentAperture.ordinal + 1) % all.size]
+            updateUIState()
+            Toast.makeText(this, "Aperture: ${currentAperture.label}", Toast.LENGTH_SHORT).show()
+        }
+
+        btnHdrNight.setOnClickListener {
+            isFusionEnabled = !isFusionEnabled
+            updateUIState()
+            val msg = if (isFusionEnabled) "Smart HDR 5 & Nightography Stacking ON" else "Fast Burst Mode Only"
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+        }
+
+        btnHist.setOnClickListener {
+            isHistogramEnabled = !isHistogramEnabled
+            updateUIState()
+        }
+
         btnAutoClick.setOnClickListener {
             isAutoClickEnabled = !isAutoClickEnabled
             lastObjectAutoClickSig = ""
             updateUIState()
-            val msg = if (isAutoClickEnabled) "Hands-Free Auto-Click ON" else "Hands-Free OFF (Manual Shutter)"
-            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
         }
 
         btnVoice.setOnClickListener {
             isVoiceEnabled = !isVoiceEnabled
             updateUIState()
+        }
+
+        btnWb.setOnClickListener {
+            val all = WbPreset.values()
+            currentWb = all[(currentWb.ordinal + 1) % all.size]
+            updateUIState()
+            if (currentMode == CamMode.MANUAL) applyManualOrAutoControl()
         }
 
         btnAiStudio.setOnClickListener {
@@ -548,20 +630,17 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             isAiStudioApiEnabled = !isAiStudioApiEnabled
             updateUIState()
         }
-        btnAiStudio.setOnLongClickListener {
-            showApiSettingsDialog()
-            true
-        }
+        btnAiStudio.setOnLongClickListener { showApiSettingsDialog(); true }
 
         btnDirector.setOnClickListener {
             val key = getGeminiKey()
             if (key.isBlank()) showApiSettingsDialog() else askGeminiCreativeDirector(key)
         }
 
-        btnZ1.setOnClickListener { setQuickZoom(1.0f) }
-        btnZ15.setOnClickListener { setQuickZoom(1.5f) }
-        btnZ2.setOnClickListener { setQuickZoom(2.0f) }
-        btnZ3.setOnClickListener { setQuickZoom(3.0f) }
+        btnZ1.setOnClickListener { setQuickZoom(1.0f, "24mm") }
+        btnZ15.setOnClickListener { setQuickZoom(1.5f, "35mm") }
+        btnZ2.setOnClickListener { setQuickZoom(2.0f, "48mm") }
+        btnZ3.setOnClickListener { setQuickZoom(3.0f, "72mm") }
 
         btnGalleryWrap.setOnClickListener { openLastPhotoInGallery() }
 
@@ -597,12 +676,12 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
     }
 
-    private fun setQuickZoom(ratio: Float) {
+    private fun setQuickZoom(ratio: Float, eqLabel: String) {
         val cam = camera ?: return
         val zState = cam.cameraInfo.zoomState.value ?: return
         val clamped = ratio.coerceIn(zState.minZoomRatio, zState.maxZoomRatio.coerceAtMost(10f))
         cam.cameraControl.setZoomRatio(clamped)
-        tvZoom.text = String.format(Locale.US, "%.1fx", clamped)
+        tvZoom.text = eqLabel
     }
 
     private fun openLastPhotoInGallery() {
@@ -678,6 +757,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
         seekIso.setOnSeekBarChangeListener(listener)
         seekShutter.setOnSeekBarChangeListener(listener)
+        seekFocus.setOnSeekBarChangeListener(listener)
     }
 
     override fun onResume() {
@@ -779,6 +859,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 val c2Info = Camera2CameraInfo.from(boundCamera.cameraInfo)
                 isoRange = c2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
                 exposureRange = c2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+                minFocusDistance = c2Info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
                 val oisModes = c2Info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION)
                 val eisModes = c2Info.getCameraCharacteristic(CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES)
                 val nrModes = c2Info.getCameraCharacteristic(CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES)
@@ -800,8 +881,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     seekShutter.progress = activeShutterSteps.size / 2
                 }
 
+                seekFocus.progress = 0
                 currentEvIndex = 0
                 lastAppliedEnvTag = ""
+                updateUIState()
                 applyManualOrAutoControl()
             } catch (e: Exception) {
                 Toast.makeText(this, "Camera start error: ${e.message}", Toast.LENGTH_LONG).show()
@@ -809,11 +892,11 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }, ContextCompat.getMainExecutor(this))
     }
 
-    // ==================== LIVE AUTOPILOT BRAIN (HUMANS + OBJECTS + TRIPOD) ====================
+    // ==================== LIVE AUTOPILOT + HISTOGRAM BRAIN ====================
 
     @OptIn(ExperimentalGetImage::class)
     private fun analyzeFrame(imageProxy: ImageProxy) {
-        if (currentMode != CamMode.AUTOPILOT || isCapturingPhoto) {
+        if (isCapturingPhoto) {
             imageProxy.close()
             return
         }
@@ -825,6 +908,26 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         val metrics = computeSceneMetrics(imageProxy)
         latestAvgLuma = metrics.avgLuma
+        latestHighlightRatio = metrics.highlightRatio
+
+        // In PRO Manual mode, still feed Live Histogram to Viewfinder (like iPhone 18 Pro Max!)
+        if (currentMode == CamMode.MANUAL) {
+            runOnUiThread {
+                overlayView.updateOverlay(
+                    boxes = emptyList(),
+                    score = 0,
+                    roll = currentRollDeg,
+                    aiActive = false,
+                    recording = isRecording,
+                    histogramBins = metrics.histBins,
+                    clipWarning = metrics.highlightRatio > 0.12f,
+                    showHist = isHistogramEnabled
+                )
+            }
+            imageProxy.close()
+            return
+        }
+
         val rotation = imageProxy.imageInfo.rotationDegrees
         val uprightW = if (rotation == 90 || rotation == 270) imageProxy.height else imageProxy.width
         val uprightH = if (rotation == 90 || rotation == 270) imageProxy.width else imageProxy.height
@@ -838,13 +941,15 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     val fh = b.height().toFloat()
                     val aspect = if (fh > 0f) fw / fh else 0f
                     val hasEyes = f.leftEyeOpenProbability != null && f.rightEyeOpenProbability != null
-                    aspect in 0.55f..1.65f && (fw / uprightW) >= 0.09f && hasEyes
+                    aspect in 0.55f..1.65f && (fw / uprightW) >= 0.08f && hasEyes
                 }
 
                 if (validFaces.isNotEmpty()) {
+                    latestHasHuman = true
                     evaluateHumanAutopilot(validFaces, uprightW.toFloat(), uprightH.toFloat(), metrics)
                     imageProxy.close()
                 } else {
+                    latestHasHuman = false
                     objectDetector.process(inputImage)
                         .addOnSuccessListener { objects ->
                             evaluateObjectOrSceneAutopilot(objects, uprightW.toFloat(), uprightH.toFloat(), metrics)
@@ -865,6 +970,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val h = imageProxy.height
         val rowStride = plane.rowStride
 
+        val rawBins = IntArray(24)
         var totalSum = 0L; var totalCount = 0
         var centerSum = 0L; var centerCount = 0
         var brightPx = 0
@@ -881,6 +987,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 if (idx < yBuf.limit()) {
                     val v = yBuf.get(idx).toInt() and 0xFF
                     totalSum += v; totalCount++
+                    rawBins[(v * 24) / 256]++
                     if (v > 236) brightPx++
                     if (x in xMin..xMax && y in yMin..yMax) {
                         centerSum += v; centerCount++
@@ -890,10 +997,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             }
             y += 8
         }
+
+        val maxBin = rawBins.maxOrNull()?.coerceAtLeast(1) ?: 1
+        val normBins = IntArray(24) { i -> ((rawBins[i] * 100) / maxBin).coerceIn(0, 100) }
         val avgLuma = if (totalCount > 0) (totalSum / totalCount).toInt() else 128
         val centerLuma = if (centerCount > 0) (centerSum / centerCount).toInt() else avgLuma
         val hiRatio = if (totalCount > 0) brightPx.toFloat() / totalCount else 0f
-        return SceneMetrics(avgLuma, centerLuma, hiRatio)
+        return SceneMetrics(avgLuma, centerLuma, hiRatio, normBins)
     }
 
     private fun evaluateHumanAutopilot(
@@ -920,16 +1030,18 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         val isNight = m.avgLuma < 52
-        val isBacklit = m.highlightRatio > 0.20f && m.centerLuma < 120
-        val isHarshSun = m.highlightRatio > 0.26f && m.avgLuma > 178
+        val isBacklit = m.highlightRatio > 0.16f && m.centerLuma < 122
+        val isHarshSun = m.highlightRatio > 0.22f && m.avgLuma > 170
 
         val planTag = when {
-            isVideoMode && isRecording -> "REC"
-            isVideoMode -> "VIDEO"
-            isOnTripod -> "TRIPOD • ${if (isSolo) "4:5 PRO" else "GROUP 3:4"}"
-            !isSolo -> "GROUP • 3:4 HDR"
-            isFront -> "SELFIE • 4:5 f/4"
-            else -> "PORTRAIT • 4:5 f/2.8"
+            isVideoMode && isRecording -> "SUPER STEADY REC"
+            isVideoMode -> "CINEMA VIDEO"
+            isNight -> "NIGHTOGRAPHY"
+            isOnTripod && isBacklit -> "TRIPOD HDR5"
+            isOnTripod -> "TRIPOD PRO"
+            !isSolo -> "GROUP 3:4"
+            isFront -> "SELFIE ${currentAperture.label}"
+            else -> "PORTRAIT ${currentAperture.label}"
         }
 
         autoAdjustEnvironmentExposure(m, isBacklit, isHarshSun, isNight)
@@ -953,21 +1065,22 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         val lightScore = when {
             isBacklit -> 17
-            m.centerLuma in 68..195 -> 20
+            m.centerLuma in 68..195 && m.highlightRatio < 0.15f -> 20
             else -> 13
         }
         val horizonScore = when {
             abs(roll) <= 5.0f -> 15
-            abs(roll) <= 10f -> 12 // Auto-straighten fixes gentle tilts automatically!
+            abs(roll) <= 10f -> 12
             else -> 4
         }
         val stabilityScore = if (isOnTripod) 10 else if (!isShaking) 9 else 2
 
         var framingScore = 30
         var coachingTip = when {
-            isVideoMode -> "Cinematic face tracking locked"
-            isOnTripod -> "Tripod Autopilot • Hold pose..."
-            else -> "✦ Autopilot Ready • 4:5 + HDR + Sharp Burst"
+            isVideoMode -> "Super Steady tracking locked"
+            isNight -> "✦ Nightography Ready — hold steady"
+            isOnTripod -> "✦ Tripod Flagship • Hold pose..."
+            else -> "✦ Ready • ${currentStyle.label} + Editorial 4:5"
         }
         var voiceMsg = ""
 
@@ -979,10 +1092,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             framingScore -= 14
             coachingTip = "Bahut paas ho, thoda peeche hato"
             voiceMsg = "Thoda peeche hato"
+        } else if (mainBox.top > 0.32f && mainBox.width() < 0.24f) {
+            framingScore -= 8
+            coachingTip = "Phone thoda upar ya seedha rakho (chhat kam aayegi)"
+            voiceMsg = "Phone thoda seedha karo"
         } else if (mainBox.centerX() < 0.16f || mainBox.centerX() > 0.84f) {
             framingScore -= 12
-            coachingTip = "Thoda frame ke andar aao"
-            voiceMsg = "Frame me aao"
+            coachingTip = "Thoda center me aao"
+            voiceMsg = "Center me aao"
         }
 
         var expressionScore = 25
@@ -995,19 +1112,19 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             voiceMsg = "Haath steady rakho"
         } else if (isFront && !isOnTripod && pitchZ < -4.2f) {
             expressionScore -= 6
-            coachingTip = "Phone eye-level par thoda upar lao"
+            coachingTip = "Phone eye-level par upar lao"
             voiceMsg = "Phone thoda upar lao"
         } else if (isBacklit) {
-            coachingTip = "Backlight HDR active — face lighting auto-balanced"
+            coachingTip = "Smart HDR 5 Active — highlights & face balanced"
         } else if (smile > 0.55f && framingScore >= 26) {
-            coachingTip = if (isOnTripod) "Tripod Autopilot • Clicking..." else "Perfect! Autopilot Clicking..."
+            coachingTip = if (isOnTripod) "✦ Tripod Flagship • Clicking..." else "✦ Perfect! Clicking..."
         }
 
         val totalScore = (framingScore + expressionScore + lightScore + horizonScore + stabilityScore).coerceIn(0, 100)
         val faceTag = when {
             !allEyesOpen && !isVideoMode -> "BLINK"
             isShaking -> "SHAKE"
-            totalScore >= 82 -> "✦ READY $totalScore%"
+            totalScore >= 82 -> "✦ LOCKED $totalScore%"
             else -> "$totalScore%"
         }
 
@@ -1029,7 +1146,19 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         runOnUiThread {
-            overlayView.updateOverlay(normBoxes, totalScore, roll, true, isRecording, faceTag, guide45 = isSolo && !isVideoMode, objectTarget = false)
+            overlayView.updateOverlay(
+                boxes = normBoxes,
+                score = totalScore,
+                roll = roll,
+                aiActive = true,
+                recording = isRecording,
+                tag = faceTag,
+                guide45 = isSolo && !isVideoMode,
+                objectTarget = false,
+                histogramBins = m.histBins,
+                clipWarning = m.highlightRatio > 0.12f,
+                showHist = isHistogramEnabled
+            )
             tvBadge.text = "✦ $planTag • $totalScore%"
             if (System.currentTimeMillis() > lastStatusHoldUntil) {
                 tvCoach.text = coachingTip
@@ -1050,8 +1179,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val isShaking = shakeIntensity > 1.20f
 
         val isNight = m.avgLuma < 52
-        val isBacklit = m.highlightRatio > 0.22f && m.centerLuma < 115
-        val isHarshSun = m.highlightRatio > 0.28f && m.avgLuma > 180
+        val isBacklit = m.highlightRatio > 0.18f && m.centerLuma < 118
+        val isHarshSun = m.highlightRatio > 0.24f && m.avgLuma > 175
 
         val normObjBoxes = objects.mapNotNull { obj ->
             val b = obj.boundingBox
@@ -1069,23 +1198,20 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val hasObject = mainObj != null
 
         val planTag = when {
-            isVideoMode && isRecording -> "REC"
-            isVideoMode -> "VIDEO"
-            isOnTripod && hasObject -> "TRIPOD • OBJ 4:5"
-            isOnTripod -> "TRIPOD • SCENE HDR"
-            hasObject -> "OBJECT • 4:5 HDR"
-            isNight -> "NIGHT • HDR PRO"
-            else -> "SCENE • 3:4 HDR"
+            isVideoMode && isRecording -> "SUPER STEADY REC"
+            isVideoMode -> "CINEMA VIDEO"
+            isNight -> "NIGHTOGRAPHY"
+            isOnTripod && hasObject -> "TRIPOD HDR5 OBJ"
+            isOnTripod -> "TRIPOD HDR5"
+            hasObject -> "OBJECT 4:5 HDR"
+            else -> "SCENE HDR5"
         }
 
         autoAdjustEnvironmentExposure(m, isBacklit, isHarshSun, isNight)
         applyEnvironmentHardwareProfile(isNight, isOnTripod)
 
-        if (mainObj != null) {
-            autoFocusOnPoint(mainObj.centerX(), mainObj.centerY())
-        } else {
-            autoFocusOnPoint(0.5f, 0.5f)
-        }
+        if (mainObj != null) autoFocusOnPoint(mainObj.centerX(), mainObj.centerY())
+        else autoFocusOnPoint(0.5f, 0.5f)
 
         val lightScore = if (m.centerLuma in 60..200) 35 else 24
         val horizonScore = if (abs(roll) <= 8f) 25 else 12
@@ -1095,7 +1221,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         } else 15
 
         val totalScore = (lightScore + horizonScore + stabilityScore + framingScore).coerceIn(0, 100)
-
         val objSig = if (mainObj != null) {
             "OBJ_${(mainObj.centerX() * 5).toInt()}_${(mainObj.centerY() * 5).toInt()}_${(mainObj.width() * 5).toInt()}"
         } else {
@@ -1105,9 +1230,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val tip = when {
             isShaking -> "Haath steady rakho"
             hasObject && objSig == lastObjectAutoClickSig -> "✦ Object Captured ✓ Naya angle ya object lao"
-            hasObject -> "✦ Object Locked • Auto 4:5 + Pro Lighting"
-            isOnTripod -> "✦ Tripod Autopilot Ready"
-            else -> "✦ Scene HDR Ready • Auto-Level Active"
+            isNight -> "✦ Nightography 3-Frame Stack Ready"
+            hasObject -> "✦ Object Locked • Smart HDR 5 + 4:5"
+            isOnTripod -> "✦ Tripod Smart HDR 5 Ready"
+            else -> "✦ Scene ProVisual Ready"
         }
 
         val allowAutoClick = !isVideoMode &&
@@ -1134,7 +1260,19 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         runOnUiThread {
             val drawBoxes = if (mainObj != null) listOf(mainObj) else emptyList()
-            overlayView.updateOverlay(drawBoxes, totalScore, roll, true, isRecording, if (hasObject) "OBJECT $totalScore%" else "", guide45 = hasObject && !isVideoMode, objectTarget = true)
+            overlayView.updateOverlay(
+                boxes = drawBoxes,
+                score = totalScore,
+                roll = roll,
+                aiActive = true,
+                recording = isRecording,
+                tag = if (hasObject) "OBJECT $totalScore%" else "",
+                guide45 = hasObject && !isVideoMode,
+                objectTarget = true,
+                histogramBins = m.histBins,
+                clipWarning = m.highlightRatio > 0.12f,
+                showHist = isHistogramEnabled
+            )
             tvBadge.text = "✦ $planTag • $totalScore%"
             if (System.currentTimeMillis() > lastStatusHoldUntil) {
                 tvCoach.text = tip
@@ -1143,7 +1281,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
     }
 
-    // ==================== TRUE AUTOPILOT CAPTURE PIPELINE ====================
+    // ==================== V7 FLAGSHIP MULTI-FRAME CAPTURE ENGINE ====================
 
     private fun triggerCapture(isAuto: Boolean) {
         val capture = imageCapture ?: return
@@ -1154,37 +1292,73 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val rollSnapshot = currentRollDeg
         val isFrontSnapshot = (lensFacing == CameraSelector.LENS_FACING_FRONT)
         val isAutopilot = (currentMode == CamMode.AUTOPILOT)
+        val styleSnapshot = currentStyle
+        val apertureSnapshot = currentAperture
         val runStudioApi = isAutopilot && isAiStudioApiEnabled && getGeminiKey().isNotBlank()
+        val isOnTripod = tripodSteadyTicks >= 18
+        val isSteady = shakeIntensity < 0.45f
 
-        // Autopilot ALWAYS runs 3-shot zero-blur burst in normal light (1 steady shot in dark night)
-        val totalShots = if (isAutopilot && latestAvgLuma >= 48) 3 else 1
+        // Decide Flagship Capture Strategy automatically!
+        val strategy = when {
+            !isAutopilot -> CaptureStrategy.BURST_BEST
+            isFusionEnabled && latestAvgLuma < 52 -> CaptureStrategy.NIGHTOGRAPHY_STACK
+            isFusionEnabled && (isOnTripod || (!latestHasHuman && isSteady)) && latestHighlightRatio > 0.06f ->
+                CaptureStrategy.SMART_HDR_FUSION
+            else -> CaptureStrategy.BURST_BEST
+        }
+
+        val evBrackets: List<Int> = when {
+            !isAutopilot -> listOf(currentEvIndex)
+            strategy == CaptureStrategy.SMART_HDR_FUSION -> {
+                val cam = camera
+                val r = cam?.cameraInfo?.exposureState?.exposureCompensationRange
+                if (r != null && r.lower <= -2 && r.upper >= 2) {
+                    listOf(
+                        (currentEvIndex - 2).coerceIn(r.lower, r.upper),
+                        currentEvIndex.coerceIn(r.lower, r.upper),
+                        (currentEvIndex + 2).coerceIn(r.lower, r.upper)
+                    )
+                } else {
+                    listOf(currentEvIndex, currentEvIndex, currentEvIndex)
+                }
+            }
+            else -> listOf(currentEvIndex, currentEvIndex, currentEvIndex)
+        }
 
         val prefix = if (isAuto) "AICAM_AUTO_" else "AICAM_"
         val fileName = prefix + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
             .format(System.currentTimeMillis())
 
         val capturedFiles = mutableListOf<File>()
-        captureBurstStep(
+        captureSequenceStep(
             step = 0,
-            total = totalShots,
+            evBrackets = evBrackets,
+            strategy = strategy,
             capturedFiles = capturedFiles,
             fileName = fileName,
             rollSnapshot = rollSnapshot,
             isFront = isFrontSnapshot,
             isAutopilot = isAutopilot,
-            runStudioApi = runStudioApi
+            style = styleSnapshot,
+            aperture = apertureSnapshot,
+            runStudioApi = runStudioApi,
+            restoreEv = currentEvIndex
         )
     }
 
-    private fun captureBurstStep(
+    private fun captureSequenceStep(
         step: Int,
-        total: Int,
+        evBrackets: List<Int>,
+        strategy: CaptureStrategy,
         capturedFiles: MutableList<File>,
         fileName: String,
         rollSnapshot: Float,
         isFront: Boolean,
         isAutopilot: Boolean,
-        runStudioApi: Boolean
+        style: PhotoStyle,
+        aperture: ApertureSetting,
+        runStudioApi: Boolean,
+        restoreEv: Int
     ) {
         val capture = imageCapture
         if (capture == null || isFinishing || isDestroyed) {
@@ -1194,93 +1368,116 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             return
         }
 
-        val statusMsg = if (total > 1) "✦ Smart Burst ${step + 1}/$total • Hold steady" else "✦ Capturing..."
-        showCoachStatus(statusMsg, "#CCFF00", 2500L)
+        val total = evBrackets.size
+        val stepLabel = when (strategy) {
+            CaptureStrategy.SMART_HDR_FUSION -> "✦ Smart HDR 5 Bracket ${step + 1}/$total • Hold still"
+            CaptureStrategy.NIGHTOGRAPHY_STACK -> "✦ Nightography Stack ${step + 1}/$total • Hold still"
+            CaptureStrategy.BURST_BEST -> if (total > 1) "✦ Pro Burst ${step + 1}/$total" else "✦ Capturing..."
+        }
+        showCoachStatus(stepLabel, "#CCFF00", 2500L)
 
-        val tempFile = File(cacheDir, "v6_shot_${System.currentTimeMillis()}_$step.jpg")
-        val outOpts = ImageCapture.OutputFileOptions.Builder(tempFile).build()
+        val isBracketed = (strategy == CaptureStrategy.SMART_HDR_FUSION && total > 1)
+        val delayMs = if (isBracketed) {
+            camera?.cameraControl?.setExposureCompensationIndex(evBrackets[step])
+            160L
+        } else {
+            0L
+        }
 
-        capture.takePicture(
-            outOpts,
-            ContextCompat.getMainExecutor(this),
-            object : ImageCapture.OnImageSavedCallback {
-                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                    capturedFiles.add(tempFile)
-                    if (step + 1 < total) {
-                        captureBurstStep(
-                            step + 1, total, capturedFiles, fileName,
-                            rollSnapshot, isFront, isAutopilot, runStudioApi
-                        )
-                    } else {
-                        finishAutopilotPipeline(
-                            capturedFiles, fileName, rollSnapshot, isFront, isAutopilot, runStudioApi
-                        )
+        mainHandler.postDelayed({
+            val activeCapture = imageCapture ?: return@postDelayed
+            val tempFile = File(cacheDir, "v7_shot_${System.currentTimeMillis()}_$step.jpg")
+            val outOpts = ImageCapture.OutputFileOptions.Builder(tempFile).build()
+
+            activeCapture.takePicture(
+                outOpts,
+                ContextCompat.getMainExecutor(this),
+                object : ImageCapture.OnImageSavedCallback {
+                    override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                        capturedFiles.add(tempFile)
+                        if (step + 1 < total) {
+                            captureSequenceStep(
+                                step + 1, evBrackets, strategy, capturedFiles, fileName,
+                                rollSnapshot, isFront, isAutopilot, style, aperture, runStudioApi, restoreEv
+                            )
+                        } else {
+                            if (isBracketed) camera?.cameraControl?.setExposureCompensationIndex(restoreEv)
+                            finishFlagshipPipeline(
+                                capturedFiles, strategy, fileName, rollSnapshot, isFront,
+                                isAutopilot, style, aperture, runStudioApi
+                            )
+                        }
+                    }
+
+                    override fun onError(exc: ImageCaptureException) {
+                        tempFile.delete()
+                        if (isBracketed) camera?.cameraControl?.setExposureCompensationIndex(restoreEv)
+                        if (capturedFiles.isNotEmpty()) {
+                            finishFlagshipPipeline(
+                                capturedFiles, CaptureStrategy.BURST_BEST, fileName, rollSnapshot, isFront,
+                                isAutopilot, style, aperture, runStudioApi
+                            )
+                        } else {
+                            isCapturingPhoto = false
+                            updateUIState()
+                            Toast.makeText(this@MainActivity, "Capture failed: ${exc.message}", Toast.LENGTH_LONG).show()
+                        }
                     }
                 }
-
-                override fun onError(exc: ImageCaptureException) {
-                    tempFile.delete()
-                    if (capturedFiles.isNotEmpty()) {
-                        finishAutopilotPipeline(
-                            capturedFiles, fileName, rollSnapshot, isFront, isAutopilot, runStudioApi
-                        )
-                    } else {
-                        isCapturingPhoto = false
-                        updateUIState()
-                        Toast.makeText(this@MainActivity, "Capture failed: ${exc.message}", Toast.LENGTH_LONG).show()
-                    }
-                }
-            }
-        )
+            )
+        }, delayMs)
     }
 
-    private fun finishAutopilotPipeline(
+    private fun finishFlagshipPipeline(
         files: List<File>,
+        strategy: CaptureStrategy,
         fileName: String,
         rollSnapshot: Float,
         isFront: Boolean,
         isAutopilot: Boolean,
+        style: PhotoStyle,
+        aperture: ApertureSetting,
         runStudioApi: Boolean
     ) {
-        showCoachStatus("✦ Autopilot: Reframing + Pro Lighting...", "#CCFF00", 6000L)
+        val statusText = when (strategy) {
+            CaptureStrategy.SMART_HDR_FUSION -> "✦ Fusing Smart HDR 5 + Editorial Crop..."
+            CaptureStrategy.NIGHTOGRAPHY_STACK -> "✦ Stacking Nightography Frames..."
+            CaptureStrategy.BURST_BEST -> "✦ Processing Photonic HDR + Editorial 4:5..."
+        }
+        showCoachStatus(statusText, "#CCFF00", 6000L)
 
         ioExecutor.execute {
-            var winnerFile: File? = null
             try {
-                val burstTag = if (files.size > 1) {
-                    val pick = photoEngine.pickBestBurstShot(files)
-                    winnerFile = pick.winnerFile
-                    "Sharp #${pick.winnerIndex}/${pick.totalCount} • "
-                } else {
-                    winnerFile = files.first()
-                    ""
-                }
-
-                if (runStudioApi && winnerFile != null) {
-                    val apiCopy = File(cacheDir, "ai_queue_${System.currentTimeMillis()}.jpg")
-                    winnerFile!!.copyTo(apiCopy, overwrite = true)
-                    enqueueAiStudioJob(apiCopy, fileName)
+                if (runStudioApi && files.isNotEmpty()) {
+                    val midFile = files[files.size / 2]
+                    if (midFile.exists()) {
+                        val apiCopy = File(cacheDir, "ai_queue_${System.currentTimeMillis()}.jpg")
+                        midFile.copyTo(apiCopy, overwrite = true)
+                        enqueueAiStudioJob(apiCopy, fileName)
+                    }
                 }
 
                 if (isAutopilot) {
-                    val result = photoEngine.processAutopilotAndSave(
-                        sourceFile = winnerFile!!,
+                    val result = photoEngine.processFlagshipAndSave(
+                        files = files,
+                        strategy = strategy,
                         fileName = fileName,
                         rollDeg = rollSnapshot,
-                        isFrontCamera = isFront
+                        isFrontCamera = isFront,
+                        style = style,
+                        aperture = aperture
                     )
                     updateGalleryThumbnail(result.uri)
-                    val msg = burstTag + result.summary
                     runOnUiThread {
-                        showCoachStatus(msg, "#CCFF00", 3500L)
-                        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+                        showCoachStatus(result.summary, "#CCFF00", 3500L)
+                        Toast.makeText(this, result.summary, Toast.LENGTH_SHORT).show()
                     }
                 } else {
-                    val uri = photoEngine.saveManualPhoto(winnerFile!!, "${fileName}_MANUAL")
+                    val uri = photoEngine.saveManualPhoto(files.first(), "${fileName}_PRO")
                     updateGalleryThumbnail(uri)
                     runOnUiThread {
-                        showCoachStatus("Manual Photo Saved", "#FFFFFF", 2000L)
-                        Toast.makeText(this, "Manual Photo Saved", Toast.LENGTH_SHORT).show()
+                        showCoachStatus("Pro Manual Photo Saved", "#FFFFFF", 2000L)
+                        Toast.makeText(this, "Pro Manual Photo Saved", Toast.LENGTH_SHORT).show()
                     }
                 }
             } catch (e: Exception) {
@@ -1288,7 +1485,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     Toast.makeText(this, "Save error: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             } finally {
-                winnerFile?.delete()
                 files.forEach { if (it.exists()) it.delete() }
                 runOnUiThread {
                     isCapturingPhoto = false
@@ -1335,7 +1531,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         tvCoach.setTextColor(Color.parseColor(hexColor))
     }
 
-    // ==================== AUTONOMOUS HARDWARE CONTROLS ====================
+    // ==================== AUTONOMOUS & PRO HARDWARE CONTROLS ====================
 
     private fun autoFocusOnPoint(normX: Float, normY: Float) {
         val now = System.currentTimeMillis()
@@ -1367,21 +1563,23 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val evRange = cam.cameraInfo.exposureState.exposureCompensationRange
         if (evRange.lower == 0 && evRange.upper == 0) return
 
+        // Smart Highlight-Priority Metering: prevents white shirt / sky clipping!
         val desiredDelta = when {
+            m.highlightRatio > 0.14f && currentEvIndex > -2 -> -1
             isHarshSun && currentEvIndex > -2 -> -1
-            isBacklit && currentEvIndex < 2 -> 1
+            isBacklit && m.highlightRatio < 0.25f && currentEvIndex < 1 -> 1
             isNight && currentEvIndex < 2 -> 1
-            m.centerLuma < 60 && m.highlightRatio < 0.15f -> 1
-            m.centerLuma > 195 || m.highlightRatio > 0.30f -> -1
-            m.centerLuma in 100..160 && !isBacklit && !isNight && currentEvIndex != 0 ->
+            m.centerLuma < 58 && m.highlightRatio < 0.08f -> 1
+            m.centerLuma > 190 -> -1
+            m.centerLuma in 98..155 && m.highlightRatio < 0.10f && !isNight && currentEvIndex != 0 ->
                 if (currentEvIndex > 0) -1 else 1
             else -> 0
         }
         if (desiredDelta == 0) return
 
         val nextEv = (currentEvIndex + desiredDelta).coerceIn(
-            evRange.lower.coerceAtLeast(-5),
-            evRange.upper.coerceAtMost(5)
+            evRange.lower.coerceAtLeast(-4),
+            evRange.upper.coerceAtMost(4)
         )
         if (nextEv != currentEvIndex) {
             currentEvIndex = nextEv
@@ -1443,6 +1641,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             c2Control.setCaptureRequestOptions(CaptureRequestOptions.Builder().build())
             tvIso.text = "ISO AUTO"
             tvShutter.text = "SHUTTER AUTO"
+            tvFocus.text = "FOCUS: AUTO"
             lastAppliedEnvTag = ""
             return
         }
@@ -1457,14 +1656,26 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val shutterPair = activeShutterSteps[seekShutter.progress.coerceIn(0, activeShutterSteps.lastIndex)]
         tvIso.text = "ISO $selectedIso"
         tvShutter.text = "SHUTTER ${shutterPair.first}"
-        tvBadge.text = "● MANUAL • ISO $selectedIso • ${shutterPair.first}"
 
-        val manualOptions = CaptureRequestOptions.Builder()
+        val builder = CaptureRequestOptions.Builder()
             .setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
             .setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, selectedIso)
             .setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, shutterPair.second)
-            .build()
-        c2Control.setCaptureRequestOptions(manualOptions)
+            .setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, currentWb.mode)
+
+        // Manual Focus Distance (0 = Auto Focus, 1..100 = Infinity to Macro)
+        if (minFocusDistance > 0f && seekFocus.progress > 0) {
+            val diopters = (seekFocus.progress / 100f) * minFocusDistance
+            builder.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_OFF)
+            builder.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, diopters)
+            tvFocus.text = if (seekFocus.progress > 75) "FOCUS: MACRO" else if (seekFocus.progress < 15) "FOCUS: ∞" else "FOCUS: ${seekFocus.progress}%"
+        } else {
+            builder.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+            tvFocus.text = "FOCUS: AUTO"
+        }
+
+        tvBadge.text = "✦ PRO • ISO $selectedIso • ${shutterPair.first}"
+        c2Control.setCaptureRequestOptions(builder.build())
     }
 
     // ==================== VIDEO RECORDING ====================
@@ -1553,7 +1764,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         AlertDialog.Builder(this)
             .setTitle("✦ Optional API Setup")
-            .setMessage("Bina API ke bhi poora Autopilot DSLR 100% offline chalega. Key save karke ✦ TIP ya background ✦ API chala sakte ho.")
+            .setMessage("Bina API ke bhi poora Flagship V7 100% offline chalega. Key save karke ✦ TIP ya background ✦ API chala sakte ho.")
             .setView(box)
             .setPositiveButton("Save") { _, _ ->
                 val newKey = etKey.text.toString().trim()
